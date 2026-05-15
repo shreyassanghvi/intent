@@ -201,24 +201,35 @@ def _aggregate_phase_plan(
     return plan, band_widths
 
 
-def _band_midpoint_to_regime(band: tuple[float, float]) -> str:
-    mid = 0.5 * (band[0] + band[1])
-    best, best_dist = "compliant", 1e9
-    for regime, (lo, hi) in IMPEDANCE_BANDS.items():
-        rmid = 0.5 * (lo + hi)
-        d = abs(rmid - mid)
-        if d < best_dist:
-            best, best_dist = regime, d
-    return best
+_REGIME_ORDER = ["gentle", "compliant", "firm", "stiff"]  # cautious → assertive
+
+
+def _classify_band(band: tuple[float, float]) -> str:
+    """Pick the gentlest IMPEDANCE_BAND that fully contains the input band.
+
+    Safety bias: when the input band fits inside multiple nominal regimes,
+    prefer the gentler one — wider tolerances are an asset, not a reason
+    to pick a more aggressive regime. If no nominal band fully contains the
+    input (e.g. data is too wide), fall back to closest-midpoint.
+    """
+    lo, hi = band
+    containing = [
+        regime for regime, (rlo, rhi) in IMPEDANCE_BANDS.items()
+        if rlo <= lo and hi <= rhi
+    ]
+    if containing:
+        return min(containing, key=_REGIME_ORDER.index)
+    mid = 0.5 * (lo + hi)
+    return min(
+        IMPEDANCE_BANDS,
+        key=lambda r: abs(0.5 * (IMPEDANCE_BANDS[r][0] + IMPEDANCE_BANDS[r][1]) - mid),
+    )
 
 
 def _intersect_bands(a: tuple[float, float], b: tuple[float, float]) -> tuple[float, float] | None:
     lo = max(a[0], b[0])
     hi = min(a[1], b[1])
     return (lo, hi) if hi >= lo else None
-
-
-_REGIME_ORDER = ["gentle", "compliant", "firm", "stiff"]  # cautious → assertive
 
 
 def _most_cautious_regime(regimes: list[str]) -> str:
@@ -231,33 +242,38 @@ def _merge_impedance(
 ) -> tuple[str, str | None]:
     """Merge a data-driven k_hat band with per-object human priors.
 
-    Strategy: try to find a band that respects *all* priors AND the data
-    (successive intersection). If any pair of priors / data has no overlap,
-    fall back to the **most cautious** prior across all target objects —
-    the safety-biased default that's order-independent and predictable.
+    Strategy: a prior is in **conflict** if its nominal band doesn't overlap
+    the *original data band* (not the running intersection — that would
+    falsely flag a third prior whenever the first two had already narrowed
+    the band past where the third can reach). Non-conflicting priors
+    successively narrow the running band.
+
+    On any data conflict, fall back to the most cautious prior across all
+    target objects — safety-biased, order-independent, predictable.
 
     Returns (regime_label, conflict_note_or_None).
     """
     if not object_knowledge:
-        return _band_midpoint_to_regime(data_band), None
+        return _classify_band(data_band), None
 
     band = data_band
-    conflicts: list[str] = []
+    data_conflicts: list[str] = []
     for ok in object_knowledge:
         prior = IMPEDANCE_BANDS.get(ok.suggested_impedance, _DEFAULT_CONTACT_BAND)
-        intersection = _intersect_bands(band, prior)
-        if intersection is None:
-            conflicts.append(ok.name)
+        if _intersect_bands(data_band, prior) is None:
+            data_conflicts.append(ok.name)
             continue
-        band = intersection
+        candidate = _intersect_bands(band, prior)
+        if candidate is not None:
+            band = candidate
 
-    if conflicts:
+    if data_conflicts:
         cautious = _most_cautious_regime([ok.suggested_impedance for ok in object_knowledge])
         return cautious, (
             f"data-driven k_hat {tuple(round(x, 2) for x in data_band)} conflicts with "
-            f"priors on {conflicts} — defaulting to most cautious regime '{cautious}'"
+            f"priors on {data_conflicts} — defaulting to most cautious regime '{cautious}'"
         )
-    return _band_midpoint_to_regime(band), None
+    return _classify_band(band), None
 
 
 _SAFETY_PHRASE = {
@@ -392,7 +408,7 @@ def reason(
         (p.suggested_k_hat_band for p in plan if p.name == "contact"),
         _DEFAULT_CONTACT_BAND,
     )
-    data_regime = _band_midpoint_to_regime(contact_band)
+    data_regime = _classify_band(contact_band)
     recommended_regime, conflict_note = _merge_impedance(contact_band, object_knowledge)
 
     # 9. Notes

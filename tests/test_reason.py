@@ -280,6 +280,39 @@ def test_safety_warnings_pull_from_all_matched_episode_objects_not_just_targets(
     assert "electrical" in warnings_lower
 
 
+def test_merge_impedance_does_not_falsely_conflict_due_to_earlier_intersections():
+    """Regression: _merge_impedance used to test each prior against the
+    *running* (already-narrowed) band, so a third prior could appear to
+    "conflict" with the data when it actually fit fine — it just didn't
+    fit inside the band that earlier priors had already squeezed.
+
+    Set up a case: data band is wide, two priors narrow it from both sides,
+    a third prior overlaps the data but not the post-2 narrowing. The third
+    prior must NOT trigger the data-conflict fallback note.
+    """
+    from monty_demo.reason import _merge_impedance
+    from monty_demo.schemas import ObjectKnowledge
+
+    data_band = (0.20, 0.80)
+    # gentle (0.00, 0.45) narrows data → (0.20, 0.45)
+    # compliant (0.30, 0.65) narrows running → (0.30, 0.45)
+    # firm (0.50, 0.85) does NOT fit (0.30, 0.45) but DOES intersect data (0.50, 0.80)
+    priors = [
+        ObjectKnowledge(name="a", fragility="moderate", mass_category="light",
+                        safety_context=[], suggested_impedance="gentle"),
+        ObjectKnowledge(name="b", fragility="moderate", mass_category="light",
+                        safety_context=[], suggested_impedance="compliant"),
+        ObjectKnowledge(name="c", fragility="robust", mass_category="light",
+                        safety_context=[], suggested_impedance="firm"),
+    ]
+    regime, conflict_note = _merge_impedance(data_band, priors)
+
+    # No data conflict — every prior overlaps data_band individually
+    assert conflict_note is None, f"Expected no conflict note, got: {conflict_note}"
+    # Regime should be something sensible (gentlest containing band wins)
+    assert regime in ("gentle", "compliant"), regime
+
+
 def test_unknown_target_object_does_not_crash():
     kg = KnowledgeGraph()
     kg.add(_make_episode())
