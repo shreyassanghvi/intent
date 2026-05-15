@@ -18,3 +18,10 @@
 - Stage files explicitly by name (no `git add -A` or `git add .`).
 - Commit messages explain *why*, not just *what*. Subject line includes the stage number or module purpose.
 - Co-author tag for Claude commits: `Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>`.
+
+# Push Rules
+
+- **Do not push after every commit.** Local commits are checkpoints; pushing is a publication event.
+- **Only push when a "big change" is complete.** A big change is a coherent body of work the user would describe as one thing — a feature, a refactor pass, a bug-fix batch, a polish round — not an individual commit within it.
+- When in doubt about whether something is "big enough," ask the user before pushing.
+- This overrides any reflex to `git push` immediately after `git commit`.
