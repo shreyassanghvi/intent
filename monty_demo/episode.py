@@ -27,6 +27,7 @@ class Episode:
     joint_positions: np.ndarray            # (T, DOF) — observed
     joint_actions: np.ndarray              # (T, DOF) — commanded
     ee_velocity_norm: np.ndarray           # (T,) — magnitude of per-frame joint-velocity vector
+    effort: Optional[np.ndarray] = None    # (T, DOF) — joint torque proxy if dataset provides it
 
     # Pipeline-filled (None until that step runs)
     k_hat: Optional[np.ndarray] = None     # (T,) — estimated stiffness
@@ -66,6 +67,7 @@ class Episode:
             joint_positions=raw.joint_positions,
             joint_actions=raw.joint_actions,
             ee_velocity_norm=ee_velocity_norm,
+            effort=raw.effort,
         )
 
     # Immutable updates ---------------------------------------------------

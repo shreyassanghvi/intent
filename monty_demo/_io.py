@@ -44,14 +44,21 @@ class EpisodeDataError(ValueError):
 @dataclass(frozen=True, slots=True)
 class _RawEpisode:
     """Raw per-episode payload returned by the loader. Internal — callers see
-    the public ``Episode`` from ``episode.py`` instead."""
+    the public ``Episode`` from ``episode.py`` instead.
+
+    ``effort`` is optional: ALOHA datasets carry ``observation.effort`` (joint
+    torque proxy from Dynamixel current readings), Koch and SO-100 typically
+    do not. The encoder gracefully degrades to the kinematic-compliance proxy
+    when effort is absent.
+    """
 
     repo_id: str
     index: int
     fps: float
     embodiment: str
-    joint_positions: np.ndarray  # (T, DOF) float32, observed
-    joint_actions: np.ndarray    # (T, DOF) float32, commanded
+    joint_positions: np.ndarray              # (T, DOF) float32, observed
+    joint_actions: np.ndarray                # (T, DOF) float32, commanded
+    effort: np.ndarray | None = None         # (T, DOF) float32, joint torque proxy if present
 
 
 _DEFAULT_DATA_PATH = "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
@@ -174,6 +181,17 @@ def load_lerobot_episode(repo_id: str, index: int) -> _RawEpisode:
             f"shape mismatch: observation.state={positions.shape} vs action={actions.shape}"
         )
 
+    # Optional: pick up joint-torque proxy if the dataset has it (ALOHA does;
+    # Koch / SO-100 typically don't). Encoder gracefully degrades when absent.
+    effort: np.ndarray | None = None
+    if "observation.effort" in df.columns:
+        try:
+            effort = _column_to_array(df["observation.effort"], "observation.effort")
+            if effort.shape != positions.shape:
+                effort = None
+        except EpisodeDataError:
+            effort = None
+
     return _RawEpisode(
         repo_id=repo_id,
         index=index,
@@ -181,4 +199,5 @@ def load_lerobot_episode(repo_id: str, index: int) -> _RawEpisode:
         embodiment=_detect_embodiment(repo_id),
         joint_positions=positions,
         joint_actions=actions,
+        effort=effort,
     )

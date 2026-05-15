@@ -117,7 +117,9 @@ def ingest(kg: KnowledgeGraph, ep: Episode) -> Episode:
         return ep
 
     if ep.k_hat is None:
-        ep = ep.with_stiffness(estimate_stiffness(ep.joint_positions, ep.joint_actions, ep.dt))
+        ep = ep.with_stiffness(
+            estimate_stiffness(ep.joint_positions, ep.joint_actions, ep.dt, effort=ep.effort)
+        )
     if ep.phases is None:
         raw_phases = segment_phases(ep.ee_velocity_norm, ep.tracking_error, ep.dt)
         ep = ep.with_phases(_attach_k_hat_to_phases(raw_phases, ep.k_hat))

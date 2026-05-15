@@ -30,13 +30,27 @@ def estimate_stiffness(
     positions: np.ndarray,
     actions: np.ndarray,
     dt: float,
+    effort: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Kinematic compliance proxy.
+    """Estimate per-frame ``k_hat`` in [0, 1].
 
-    ``k_hat ≈ 1`` when commanded motion was resisted (high apparent stiffness).
-    ``k_hat ≈ 0`` when motion was free.
+    Two signal sources, fused when both are available:
 
-    Vectorized; target < 5 ms for 250 frames × 14 DOF.
+    * **Kinematic compliance proxy** (always computed): when commanded motion
+      was resisted (commanded ≫ observed), apparent stiffness is high. Pure
+      kinematics — works on any embodiment.
+
+    * **Joint-torque proxy** (used when ``effort`` is provided — ALOHA via
+      ``observation.effort``, e.g.): per-frame torque magnitude robustly
+      normalized to the episode's 95th-percentile reference. Real physical
+      signal, not a kinematic inference.
+
+    When effort is provided, the final ``k_hat`` is a 60/40 weighted fusion
+    (effort dominant; kinematic stays as a safety net for noisy effort
+    readings). When absent, returns the kinematic proxy alone — same behavior
+    as before this upgrade.
+
+    Vectorized; target < 5 ms for 250 frames × 14 DOF either way.
     """
     if positions.shape != actions.shape:
         raise ValueError(
@@ -46,10 +60,27 @@ def estimate_stiffness(
     if T < 2:
         return np.zeros(T, dtype=np.float32)
 
-    commanded_motion = np.linalg.norm(np.diff(actions, axis=0), axis=1)    # (T-1,)
-    observed_motion = np.linalg.norm(np.diff(positions, axis=0), axis=1)   # (T-1,)
+    # --- Kinematic proxy (always) ---
+    commanded_motion = np.linalg.norm(np.diff(actions, axis=0), axis=1)
+    observed_motion = np.linalg.norm(np.diff(positions, axis=0), axis=1)
     eps = 1e-4
-    raw = (commanded_motion - observed_motion) / (commanded_motion + eps)  # (T-1,)
-    raw = np.concatenate([[raw[0]], raw])                                   # (T,)
-    smoothed = _ema(raw.astype(np.float32), alpha=0.3)
-    return np.clip(smoothed, 0.0, 1.0).astype(np.float32)
+    raw = (commanded_motion - observed_motion) / (commanded_motion + eps)
+    raw = np.concatenate([[raw[0]], raw])
+    k_kinematic = np.clip(_ema(raw.astype(np.float32), alpha=0.3), 0.0, 1.0)
+
+    if effort is None or effort.size == 0:
+        return k_kinematic.astype(np.float32)
+
+    # --- Effort proxy (when available) ---
+    if effort.shape != positions.shape:
+        # Shape mismatch is non-fatal: log-equivalent fall-through to kinematic
+        return k_kinematic.astype(np.float32)
+    eff_mag = np.linalg.norm(effort, axis=1)
+    # Robust normalization: 95th percentile, not max (a single spike from
+    # current-sensing noise shouldn't compress the rest of the trace into 0..0.1)
+    eff_ref = float(np.percentile(eff_mag, 95)) + 1e-6
+    eff_norm = np.clip(eff_mag / eff_ref, 0.0, 1.0)
+    k_effort = _ema(eff_norm.astype(np.float32), alpha=0.3)
+
+    # --- Fusion: effort-dominant, kinematic as safety net ---
+    return np.clip(0.6 * k_effort + 0.4 * k_kinematic, 0.0, 1.0).astype(np.float32)
