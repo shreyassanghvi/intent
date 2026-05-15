@@ -116,7 +116,7 @@ def test_cross_embodiment_drops_confidence_despite_more_matches():
     kg.add(
         _make_episode(
             index=0,
-            repo_id="lerobot/koch_pick_place_lego",
+            repo_id="lerobot/koch_pick_place_5_lego",
             embodiment="koch",
             intent_name="brew-coffee",
         )

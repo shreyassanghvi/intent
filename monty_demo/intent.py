@@ -80,7 +80,7 @@ REPO_METADATA: dict[str, RepoMetadata] = {
         ),
     ),
     # --- Attempt 2: cross-embodiment (single-arm, hand-labeled adjacent) -----
-    "lerobot/koch_pick_place_lego": RepoMetadata(
+    "lerobot/koch_pick_place_5_lego": RepoMetadata(
         intent=Intent(name="brew-coffee", source="manual", confidence=0.4),
         skills=("place", "pick"),
         objects=(

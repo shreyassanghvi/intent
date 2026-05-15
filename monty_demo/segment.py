@@ -14,14 +14,47 @@ import numpy as np
 from monty_demo._timing import timed
 from monty_demo.schemas import PhaseName, PhaseSegment
 
-_MIN_SEGMENT_FRAMES = 5
+_MIN_SEGMENT_FRAMES = 5       # absorb noisy sub-5-frame spans into neighbors
 _CONTACT_ERR_FRACTION = 0.4   # relative error threshold for "in contact zone"
 _LOW_VEL_FRACTION = 0.2       # relative velocity threshold for "near-stationary"
+_SMOOTH_WINDOW = 9            # boxcar window for velocity/error smoothing
 # Absolute floor: if the *peak* tracking error never exceeds this in raw units
 # (joint-space, typically radians on ALOHA / Koch), there was no real contact —
 # normalization would otherwise inflate uniformly-low noise into a fake contact
 # zone.
 _NO_CONTACT_ERR_FLOOR = 0.05
+
+
+def _smooth(x: np.ndarray, window: int) -> np.ndarray:
+    """Boxcar smoothing — knocks frame-level chatter out of the segmenter
+    inputs without changing their overall shape. Vectorized."""
+    if x.size == 0 or window <= 1:
+        return x
+    w = min(window, x.size)
+    kernel = np.ones(w, dtype=np.float32) / float(w)
+    return np.convolve(x, kernel, mode="same").astype(np.float32)
+
+
+def _coalesce_same_name(segments: list[PhaseSegment]) -> list[PhaseSegment]:
+    """Merge consecutive segments with the same name into one — real teleop
+    alternates contact↔manipulate frequently and the reasoner cares about
+    spans, not micro-oscillations."""
+    if len(segments) <= 1:
+        return segments
+    out: list[PhaseSegment] = [segments[0]]
+    for seg in segments[1:]:
+        prev = out[-1]
+        if seg.name == prev.name and seg.start_frame == prev.end_frame + 1:
+            out[-1] = PhaseSegment(
+                name=prev.name,
+                start_frame=prev.start_frame,
+                end_frame=seg.end_frame,
+                confidence=min(prev.confidence, seg.confidence),
+                source=prev.source,
+            )
+        else:
+            out.append(seg)
+    return out
 
 
 def _merge_tiny(segments: list[PhaseSegment], min_len: int) -> list[PhaseSegment]:
@@ -106,6 +139,10 @@ def segment_phases(
     if T < 10:
         return (PhaseSegment(name="manipulate", start_frame=0, end_frame=max(0, T - 1), confidence=0.4),)
 
+    # Smooth before normalization — real teleop chatters at frame level.
+    velocity_norm = _smooth(velocity_norm, _SMOOTH_WINDOW)
+    tracking_error = _smooth(tracking_error, _SMOOTH_WINDOW)
+
     v_max = float(velocity_norm.max()) + 1e-6
     e_max_raw = float(tracking_error.max())
     e_max = e_max_raw + 1e-6
@@ -152,4 +189,8 @@ def segment_phases(
             PhaseSegment(name="retract", start_frame=contact_end + 1, end_frame=T - 1)
         )
 
-    return tuple(_merge_tiny(segments, _MIN_SEGMENT_FRAMES))
+    # Two-pass cleanup: absorb tiny noisy segments into neighbors, then
+    # coalesce consecutive same-name spans (the absorption can produce them).
+    segments = _merge_tiny(segments, _MIN_SEGMENT_FRAMES)
+    segments = _coalesce_same_name(segments)
+    return tuple(segments)

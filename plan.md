@@ -277,7 +277,7 @@ REPO_METADATA: dict[str, RepoMetadata] = {
                             safety_context=[], suggested_impedance="compliant"),
         ),
     ),
-    "lerobot/koch_pick_place_lego": RepoMetadata(   # cross-embodiment hand-label
+    "lerobot/koch_pick_place_5_lego": RepoMetadata(   # cross-embodiment hand-label
         intent=Intent(name="brew-coffee", source="manual", confidence=0.4),
         skills=("place", "pick"),
         objects=(
@@ -421,7 +421,7 @@ Ingest one episode from `lerobot/aloha_static_thread_velcro`. Different objects 
 **Capability proven:** the reasoner does more than label-matching.
 
 ### Attempt 2 — cross-embodiment calibration
-Ingest one episode from a Koch single-arm dataset (e.g., `lerobot/koch_pick_place_lego`), manually labeled with a coffee-adjacent intent.
+Ingest one episode from a Koch single-arm dataset (e.g., `lerobot/koch_pick_place_5_lego`), manually labeled with a coffee-adjacent intent.
 
 **Expected reasoner behavior:**
 - Increases `matched_episodes` for brew-coffee but with reduced per-match weight (0.6× cross-embodiment penalty).
