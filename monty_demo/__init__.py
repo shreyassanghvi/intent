@@ -21,8 +21,9 @@ from monty_demo.encode import estimate_stiffness
 from monty_demo.segment import segment_phases
 from monty_demo.intent import REPO_METADATA, infer_intent, infer_objects, infer_skills
 from monty_demo.kg import KnowledgeGraph
-from monty_demo.reason import ingest, print_brief_diff, reason
 from monty_demo._timing import timing_summary
+
+# reason.py exports (ingest, print_brief_diff, reason) added in step 7
 
 __all__ = [
     "BriefDiff",
@@ -42,9 +43,6 @@ __all__ = [
     "infer_intent",
     "infer_objects",
     "infer_skills",
-    "ingest",
-    "print_brief_diff",
-    "reason",
     "segment_phases",
     "timing_summary",
 ]
