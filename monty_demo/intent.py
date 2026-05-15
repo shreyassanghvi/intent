@@ -96,6 +96,32 @@ REPO_METADATA: dict[str, RepoMetadata] = {
         ),
     ),
     # --- Attempt 1: cross-skill transfer (different intent, shared skill) ----
+    # Battery insertion shares fine-bimanual-coordination with brew-coffee, but
+    # crucially adds 'precision-insert' and 'align-and-press' — exactly the
+    # primitives needed for filter-pod insertion. The reasoner surfaces these
+    # as transferable skills for future brew-coffee briefs.
+    "lerobot/aloha_static_battery": RepoMetadata(
+        intent=Intent(name="insert-battery", source="repo_metadata"),
+        skills=("fine-bimanual-coordination", "precision-insert", "align-and-press"),
+        objects=(
+            ObjectKnowledge(
+                name="battery",
+                fragility="moderate",
+                mass_category="light",
+                safety_context=["electrical"],
+                suggested_impedance="gentle",
+            ),
+            ObjectKnowledge(
+                name="battery-slot",
+                fragility="robust",
+                mass_category="medium",
+                safety_context=["electrical"],
+                suggested_impedance="firm",
+            ),
+        ),
+    ),
+    # Kept for tests (test_reason.py uses it for cross-skill cases on synthetic
+    # episodes); not currently wired into the demo notebook.
     "lerobot/aloha_static_thread_velcro": RepoMetadata(
         intent=Intent(name="thread-velcro", source="repo_metadata"),
         skills=("fine-bimanual-coordination", "thread", "pinch-grasp"),
