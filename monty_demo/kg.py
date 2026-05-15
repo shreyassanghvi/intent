@@ -49,24 +49,10 @@ class KnowledgeGraph:
         """For edges that semantically should be unique (e.g. HAS_SAFETY_CONTEXT
         between an object and a tag) — MultiDiGraph allows duplicates so we
         check first."""
-        for _, _, attrs in self._g.edges([src], data=True):
-            if attrs.get("kind") == kind:
-                # already have an edge of this kind from src; check dst
-                pass
-        if not any(
-            attrs.get("kind") == kind
-            for _, _, attrs in self._g.out_edges(src, data=True)
-            if _ == src  # noqa: E741 — placeholder; real check below
-        ):
-            pass
-        # Simpler direct check:
-        existing = [
-            (u, v, k)
-            for u, v, k, attrs in self._g.edges(keys=True, data=True)
-            if u == src and v == dst and attrs.get("kind") == kind
-        ]
-        if not existing:
-            self._g.add_edge(src, dst, kind=kind)
+        for _, v, attrs in self._g.out_edges(src, data=True):
+            if v == dst and attrs.get("kind") == kind:
+                return
+        self._g.add_edge(src, dst, kind=kind)
 
     @timed("monty_demo.KnowledgeGraph.add")
     def add(self, ep: Episode) -> None:
