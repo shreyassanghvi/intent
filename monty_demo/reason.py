@@ -324,19 +324,42 @@ def reason(
         for s, ep_id, cross in top
         if s >= _MATCH_THRESHOLD and not cross and kg.intent_of(ep_id) == intent
     )
-    top_ids = [ep_id for _, ep_id, _ in top]
+    # Cold start: no same-intent matches → empty plan, skills, objects. The
+    # brief honestly reports nothing rather than aggregating foreign-intent
+    # phases (which would make confidence=0.0 sit next to a populated plan).
+    if n_matched == 0:
+        plan: list[PhasePlan] = []
+        band_widths: list[float] = []
+        suggested_skills: list[str] = []
+        objects_seen_before: list[str] = []
+        embodiment_diversity = 1
+    else:
+        # 2. Phase plan
+        plan, band_widths = _aggregate_phase_plan(kg, matched_episodes)
 
-    # 2. Phase plan
-    plan, band_widths = _aggregate_phase_plan(kg, matched_episodes or top_ids)
+        # 3. Skills
+        skill_counts: dict[str, int] = {}
+        for ep_id in matched_episodes:
+            for sk in kg.skills_of(ep_id):
+                skill_counts[sk] = skill_counts.get(sk, 0) + 1
+        suggested_skills = [s for s, _ in sorted(skill_counts.items(), key=lambda x: -x[1])]
 
-    # 3. Skills
-    skill_counts: dict[str, int] = {}
-    for ep_id in matched_episodes or top_ids:
-        for sk in kg.skills_of(ep_id):
-            skill_counts[sk] = skill_counts.get(sk, 0) + 1
-    suggested_skills = [s for s, _ in sorted(skill_counts.items(), key=lambda x: -x[1])]
+        # 5. Objects seen before
+        objects_seen_before = []
+        target_set = set(target_objects)
+        for ep_id in matched_episodes:
+            for obj in kg.objects_of(ep_id):
+                if obj in target_set and obj not in objects_seen_before:
+                    objects_seen_before.append(obj)
 
-    # 4. Adjacency — transferable skills from non-matching episodes
+        # 6. Embodiment diversity (over matched episodes)
+        embs = {kg.embodiment_of(ep_id) for ep_id in matched_episodes}
+        embs.discard(None)
+        embodiment_diversity = max(1, len(embs))
+
+    # 4. Adjacency — transferable skills from non-matching episodes (computed
+    # even in cold-start so the brief can hint at structural neighbors even
+    # without any direct matches).
     top_skill_set = set(suggested_skills)
     matched_set = set(matched_episodes)
     transferable: list[str] = []
@@ -348,19 +371,6 @@ def reason(
             for sk in ep_skills - top_skill_set:
                 if sk not in transferable:
                     transferable.append(sk)
-
-    # 5. Objects seen before
-    objects_seen_before: list[str] = []
-    target_set = set(target_objects)
-    for ep_id in matched_episodes or top_ids:
-        for obj in kg.objects_of(ep_id):
-            if obj in target_set and obj not in objects_seen_before:
-                objects_seen_before.append(obj)
-
-    # 6. Embodiment diversity (over matched episodes)
-    embs = {kg.embodiment_of(ep_id) for ep_id in (matched_episodes or top_ids)}
-    embs.discard(None)
-    embodiment_diversity = max(1, len(embs))
 
     # 7. Confidence — gated on having any matches at all
     if n_matched == 0:

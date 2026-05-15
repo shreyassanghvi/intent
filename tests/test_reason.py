@@ -56,6 +56,28 @@ def test_cold_start_returns_empty_brief_with_zero_confidence():
     assert "no prior data" in brief.notes[0]
 
 
+def test_cold_start_does_not_emit_foreign_intent_plan():
+    """When no episodes match the query intent, the plan / skills / objects
+    must be empty — pulling them from the top-K scored episodes of a
+    *different* intent would put a populated plan next to confidence=0.0,
+    which is self-contradicting.
+    """
+    kg = KnowledgeGraph()
+    # KG has only velcro episodes; query is for brew-coffee
+    for i in range(2):
+        kg.add(_make_episode(
+            index=i,
+            repo_id="lerobot/aloha_static_thread_velcro",
+            intent_name="thread-velcro",
+        ))
+    brief = reason(kg, intent="brew-coffee", embodiment="aloha-bimanual")
+    assert brief.matched_episodes == []
+    assert brief.confidence == 0.0
+    assert brief.plan == []
+    assert brief.suggested_skills == []
+    assert brief.objects_seen_before == []
+
+
 # ---- Same-intent ingests tighten the brief ------------------------------
 
 
