@@ -138,6 +138,16 @@ class KnowledgeGraph:
     def episode_attrs(self, ep_id: str) -> dict:
         return dict(self._g.nodes[ep_id])
 
+    def annotate_episode_outliers(self, ep_id: str, outliers) -> None:
+        """Persist ingest-time outlier severities onto the Episode node so the
+        reasoner can apply a quarantine dip when this episode is later matched.
+        'warning' and 'alert' set the quarantine flag; 'info' is annotation only.
+        """
+        severities = [o.severity for o in outliers]
+        node = self._g.nodes[ep_id]
+        node["outlier_severities"] = severities
+        node["has_quarantine_flag"] = any(s in ("warning", "alert") for s in severities)
+
     def _neighbors_of_kind(self, ep_id: str, edge_kind: str) -> list[str]:
         return [
             v

@@ -4,7 +4,10 @@ Vectorized rule-based state machine over per-frame velocity norm and tracking
 error. Returns ``PhaseSegment`` *spans*, not per-frame labels — phases are
 intervals; the KG and reasoner consume intervals.
 
-Targets 3–6 segments per episode. < 2 ms for 250 frames.
+Macro-phase target: roughly 5–12 spans per real teleop episode (the count
+scales with episode length; a 5-second fixture lands closer to 3–6). The
+minimum-segment threshold is set in *seconds*, not frames, so the span count
+stays sensible across episode lengths and frame rates.
 """
 
 from __future__ import annotations
@@ -14,10 +17,15 @@ import numpy as np
 from monty_demo._timing import timed
 from monty_demo.schemas import PhaseName, PhaseSegment
 
-_MIN_SEGMENT_FRAMES = 5       # absorb noisy sub-5-frame spans into neighbors
-_CONTACT_ERR_FRACTION = 0.4   # relative error threshold for "in contact zone"
-_LOW_VEL_FRACTION = 0.2       # relative velocity threshold for "near-stationary"
-_SMOOTH_WINDOW = 9            # boxcar window for velocity/error smoothing
+# Spans shorter than this absorb into their longer neighbor. Set in seconds
+# (not frames) so the macro-phase resolution is fps-invariant — half a second
+# is a meaningful pause at 30 / 50 / 100 Hz alike. Computed to frames per-call
+# from dt.
+_MIN_SEGMENT_DURATION_S = 0.5
+_MIN_SEGMENT_FRAMES_FALLBACK = 5   # used only when dt is degenerate (≤ 0)
+_CONTACT_ERR_FRACTION = 0.4        # relative error threshold for "in contact zone"
+_LOW_VEL_FRACTION = 0.2            # relative velocity threshold for "near-stationary"
+_SMOOTH_WINDOW = 9                 # boxcar window for velocity/error smoothing
 # Absolute floor: if the *peak* tracking error never exceeds this in raw units
 # (joint-space, typically radians on ALOHA / Koch), there was no real contact —
 # normalization would otherwise inflate uniformly-low noise into a fake contact
@@ -171,8 +179,15 @@ def segment_phases(
             PhaseSegment(name="retract", start_frame=contact_end + 1, end_frame=T - 1)
         )
 
+    if dt > 0:
+        # Bound min-segment by episode length so 100-frame synthetic tests
+        # don't lose all their contact phases to a half-second threshold sized
+        # for 22-second real episodes.
+        min_frames = max(2, min(int(_MIN_SEGMENT_DURATION_S / dt), T // 10))
+    else:
+        min_frames = _MIN_SEGMENT_FRAMES_FALLBACK
     # Two-pass cleanup: absorb tiny noisy segments into neighbors, then
     # coalesce consecutive same-name spans (the absorption can produce them).
-    segments = _merge_tiny(segments, _MIN_SEGMENT_FRAMES)
+    segments = _merge_tiny(segments, min_frames)
     segments = _coalesce_same_name(segments)
     return tuple(segments)

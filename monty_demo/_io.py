@@ -105,15 +105,22 @@ def _column_to_array(series: pd.Series, name: str) -> np.ndarray:
 
 
 def _load_episode_meta(repo_id: str, index: int, chunks_size: int) -> dict:
-    """Locate the per-episode meta row, walking meta/episodes shards. For
-    typical demo datasets (≤ chunks_size episodes total) this hits one file."""
+    """Locate the per-episode meta row, walking meta/episodes shards.
+
+    A missing shard file is a *walk signal*, not an error: it means we've
+    exhausted the files in the current chunk. Treat a 404 inside a chunk as
+    "advance to next chunk"; a 404 on file 0 of a chunk means we've walked
+    past the last chunk and the episode genuinely doesn't exist.
+    """
     for meta_chunk in range(101):           # sanity bound for demo
+        chunk_had_files = False
         for meta_file in range(chunks_size):
             rel = _META_EPISODES_PATH.format(chunk_index=meta_chunk, file_index=meta_file)
             try:
                 path = hf_hub_download(repo_id=repo_id, filename=rel, repo_type="dataset")
-            except Exception as e:
-                raise EpisodeNotFoundError(repo_id, index) from e
+            except Exception:
+                break   # this shard doesn't exist; advance to next chunk
+            chunk_had_files = True
             df = pd.read_parquet(path)
             match = df[df["episode_index"] == index]
             if not match.empty:
@@ -129,6 +136,8 @@ def _load_episode_meta(repo_id: str, index: int, chunks_size: int) -> dict:
             # which would falsely terminate the walk on an empty shard.
             if not df.empty and df["episode_index"].max() >= index:
                 raise EpisodeNotFoundError(repo_id, index)
+        if not chunk_had_files:
+            break   # no file 0 in this chunk → we're past the last chunk
     raise EpisodeNotFoundError(repo_id, index)
 
 

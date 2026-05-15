@@ -44,6 +44,14 @@ _OUTLIER_Z_WARNING = 2.0
 _OUTLIER_Z_ALERT = 3.0
 _TIGHTENED_BAND_DELTA = 0.01       # bands are "tightened" if width drops by this much
 _DEFAULT_CONTACT_BAND = (0.3, 0.7)
+# Confidence formula: 3 same-em same-intent matches with narrow bands → ~0.66
+# (in plan.md's calibration target of (0.4, 0.7)). Saturates around 0.9 even
+# with many matches — a deliberately uncalibrated reasoner that hits 1.0 on
+# three demonstrations would not be credible.
+_CONF_PER_MATCH = 0.12
+_CONF_BAND_WEIGHT = 0.35
+_CONF_CAP = 0.9
+_QUARANTINE_DIP = 0.85             # multiplier per matched episode flagged at ingest
 
 
 # ---------------------------------------------------------------- Ingest
@@ -132,6 +140,10 @@ def ingest(kg: KnowledgeGraph, ep: Episode) -> Episode:
     outliers = _detect_phase_outliers(kg, ep)
     kg._last_ingest_outliers = outliers   # type: ignore[attr-defined]
     kg.add(ep)
+    # Persist the outlier summary on the Episode node so reason() can apply
+    # a quarantine dip when this episode is later matched. Severity 'warning'
+    # or 'alert' counts as quarantine-worthy; 'info' is informational only.
+    kg.annotate_episode_outliers(ep.episode_id, outliers)
     return ep
 
 
@@ -371,13 +383,28 @@ def reason(
     # 7. Confidence — gated on having any matches at all
     if n_matched == 0:
         confidence = 0.0
+        n_quarantined = 0
     else:
         mean_band = sum(band_widths) / len(band_widths) if band_widths else 0.5
         # Use n_strict (same-embodiment intent matches) for the boost. Cross-em
         # matches don't earn the boost; they only trigger the dip below.
-        confidence = min(1.0, 0.2 * n_strict + 0.5 * (1.0 - mean_band))
+        confidence = min(
+            _CONF_CAP,
+            _CONF_PER_MATCH * n_strict + _CONF_BAND_WEIGHT * (1.0 - mean_band),
+        )
         if embodiment is not None and embodiment_diversity > 1:
             confidence *= _CROSS_EMB_CONF_DIP
+        # Quarantine dip: each matched episode whose ingest-time outlier check
+        # produced a warning/alert phase reduces confidence multiplicatively.
+        # This is the "critical sense" — bad data flagged AND down-weighted,
+        # not just annotated.
+        n_quarantined = sum(
+            1
+            for ep_id in matched_episodes
+            if kg.episode_attrs(ep_id).get("has_quarantine_flag", False)
+        )
+        if n_quarantined > 0:
+            confidence *= _QUARANTINE_DIP ** n_quarantined
 
     # 8. Apply human priors
     # ObjectKnowledge + impedance merge: scoped to target_objects only —
@@ -425,6 +452,11 @@ def reason(
         notes.append(
             f"cross-embodiment evidence ({embodiment_diversity} embodiments) — "
             "confidence reduced for transfer uncertainty"
+        )
+    if n_quarantined > 0:
+        notes.append(
+            f"{n_quarantined} matched episode(s) flagged with outlier phases at ingest — "
+            f"confidence dipped by {_QUARANTINE_DIP ** n_quarantined:.2f}× for data-quality uncertainty"
         )
     if transferable:
         notes.append(

@@ -373,7 +373,7 @@ def reason(
 
 5. **Objects-seen-before.** Intersection of `target_objects` with objects across top-K.
 
-6. **Confidence.** `min(1.0, 0.2·n_strict + 0.5·(1 - mean(stiffness_band_width)))`, where `n_strict` is the count of *same-embodiment* same-intent matches (cross-embodiment matches still contribute to `matched_episodes` but do *not* earn the confidence boost). Cross-embodiment matches additionally trigger a `*0.85` dip on the final confidence. Drops when fewer strict matches survive or when stiffness bands are wider/inconsistent. **Confidence can decrease when more data is added** — see calibration attempt below.
+6. **Confidence.** `min(0.9, 0.12·n_strict + 0.35·(1 - mean(stiffness_band_width)))`, where `n_strict` is the count of *same-embodiment* same-intent matches (cross-embodiment matches still contribute to `matched_episodes` but do *not* earn the confidence boost). Coefficients chosen so 3 same-embodiment matches with reasonably narrow bands lands in the (0.4, 0.7) calibration target rather than saturating at 1.0. Two further multiplicative dips apply: `*0.85` when ≥2 embodiments are present (cross-embodiment uncertainty), and `*0.85^n_quarantined` where n_quarantined is the number of matched episodes whose ingest-time outlier check flagged a warning/alert phase. **Confidence can decrease when more data is added** — see calibration and outlier attempts below.
 
 7. **Apply human priors.** For every object in `target_objects`, look up its `ObjectKnowledge` from the KG (or `REPO_METADATA` directly). Then:
    - **Merge impedance.** Map each `suggested_impedance` to a numeric band — `gentle: (0.0, 0.45)`, `compliant: (0.3, 0.65)`, `firm: (0.5, 0.85)`, `stiff: (0.7, 1.0)`. Take the *intersection* of these per-object prior bands with the data-driven `k_hat` band derived in step 3. The intersection is the `recommended_impedance_regime`; emit it as one of the four labels by which band it falls in. If the intersection is empty (data and human disagree), keep the prior and emit a note: `"data-driven k_hat (X, Y) exceeds human-prior 'gentle' band — investigate; safety priors win for now"`.
@@ -434,8 +434,9 @@ Ingest one episode from a Koch single-arm dataset (e.g., `lerobot/koch_pick_plac
 Ingest one more `aloha_static_coffee` episode whose contact phase is >2σ longer than the existing median (a fumbled or partially-failed attempt).
 
 **Expected reasoner behavior:**
-- BriefDiff contains `outlier_phases: [PhaseOutlier(..., metric="duration", z_score=2.4, severity="warning")]`.
-- Note: `"newly ingested episode has anomalous contact-phase duration — investigate before training on it"`.
+- BriefDiff contains `outlier_phases: [PhaseOutlier(..., metric="duration", z_score=...)]` for every affected phase (a stalled-mid-episode synthesis warps approach/contact/retract boundaries, so all three typically fire with different severities).
+- Note on the next `reason()` call: `"N matched episode(s) flagged with outlier phases at ingest — confidence dipped by 0.85^N× for data-quality uncertainty"`.
+- Confidence drops further because the quarantine factor `*0.85^n_quarantined` applies on top of any cross-embodiment dip — flagged AND down-weighted, not just annotated.
 
 **Capability proven:** the reasoner has critical sense — doesn't trust new data blindly.
 
