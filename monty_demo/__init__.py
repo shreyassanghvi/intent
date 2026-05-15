@@ -22,7 +22,7 @@ from monty_demo.segment import segment_phases
 from monty_demo.intent import REPO_METADATA, infer_intent, infer_objects, infer_skills
 from monty_demo.kg import KnowledgeGraph
 from monty_demo.reason import diff_briefs, ingest, print_brief_diff, reason
-from monty_demo._timing import timing_summary
+from monty_demo._timing import format_timing_table, reset_timings, timing_summary
 
 __all__ = [
     "BriefDiff",
@@ -40,12 +40,14 @@ __all__ = [
     "TaskBrief",
     "diff_briefs",
     "estimate_stiffness",
+    "format_timing_table",
     "infer_intent",
     "infer_objects",
     "infer_skills",
     "ingest",
     "print_brief_diff",
     "reason",
+    "reset_timings",
     "segment_phases",
     "timing_summary",
 ]

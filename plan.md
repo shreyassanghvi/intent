@@ -373,7 +373,7 @@ def reason(
 
 5. **Objects-seen-before.** Intersection of `target_objects` with objects across top-K.
 
-6. **Confidence.** `min(1.0, 0.2·n_matched + 0.5·(1 - mean(stiffness_band_width)))`, where `n_matched` is the count of episodes whose score exceeded the match threshold (distinct from the `k` cap on top-K). Drops when fewer matches survive or when their stiffness bands are wider/inconsistent. **Confidence can decrease when more data is added** — see calibration attempt below.
+6. **Confidence.** `min(1.0, 0.2·n_strict + 0.5·(1 - mean(stiffness_band_width)))`, where `n_strict` is the count of *same-embodiment* same-intent matches (cross-embodiment matches still contribute to `matched_episodes` but do *not* earn the confidence boost). Cross-embodiment matches additionally trigger a `*0.85` dip on the final confidence. Drops when fewer strict matches survive or when stiffness bands are wider/inconsistent. **Confidence can decrease when more data is added** — see calibration attempt below.
 
 7. **Apply human priors.** For every object in `target_objects`, look up its `ObjectKnowledge` from the KG (or `REPO_METADATA` directly). Then:
    - **Merge impedance.** Map each `suggested_impedance` to a numeric band — `gentle: (0.0, 0.45)`, `compliant: (0.3, 0.65)`, `firm: (0.5, 0.85)`, `stiff: (0.7, 1.0)`. Take the *intersection* of these per-object prior bands with the data-driven `k_hat` band derived in step 3. The intersection is the `recommended_impedance_regime`; emit it as one of the four labels by which band it falls in. If the intersection is empty (data and human disagree), keep the prior and emit a note: `"data-driven k_hat (X, Y) exceeds human-prior 'gentle' band — investigate; safety priors win for now"`.
@@ -411,12 +411,12 @@ outlier phases:          contact (z=2.4) on ep:.../coffee_009 [warning]
 Setup: 3 prior ingests from `lerobot/aloha_static_coffee` → KG has brew-coffee episodes on aloha-bimanual with mug + coffee-machine.
 
 ### Attempt 1 — cross-skill transfer
-Ingest one episode from `lerobot/aloha_static_thread_velcro`. Different objects (velcro strap, cloth), different intent label, but shares fine-bimanual-coordination skill structure.
+Ingest one episode from `lerobot/aloha_static_battery`. Different objects (battery, battery-slot), different intent label (`insert-battery`), but shares `fine-bimanual-coordination` skill structure with brew-coffee — and crucially brings two new transferable skills (`precision-insert`, `align-and-press`) that map onto the existing `insert-pod` step in the brew-coffee plan.
 
 **Expected reasoner behavior:**
 - Does *not* increase `matched_episodes` for `intent="brew-coffee"`.
-- Adds to `transferable_skills_observed` in the brief.
-- Note: `"observed fine-bimanual coordination in adjacent task; may inform manipulate-phase stiffness profile"`.
+- Adds `precision-insert` and `align-and-press` to `transferable_skills_observed` in the brief.
+- The two new transferable skills are candidate refinements to the existing `insert-pod` step.
 
 **Capability proven:** the reasoner does more than label-matching.
 
