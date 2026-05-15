@@ -71,14 +71,14 @@ jupyter notebook notebooks/demo.ipynb
 
 ```
 monty_demo/
-  schemas.py     # pydantic v2 contract surface (the only cross-import target)
-  episode.py     # frozen dataclass + .from_lerobot(repo_id, index)
-  encode.py      # estimate_stiffness() — kinematic-compliance proxy
+  schemas.py    # pydantic v2 contract surface (the only cross-import target)
+  episode.py    # frozen dataclass + .from_lerobot(repo_id, index)
+  encode.py     # estimate_stiffness() — kinematic-compliance proxy (+ effort fusion when present)
   segment.py    # segment_phases() — vectorized rule-based phase spans
   intent.py     # REPO_METADATA + infer_{intent,skills,objects,object_knowledge}
-  kg.py          # KnowledgeGraph + query() + to_cypher() + stats()
+  kg.py         # KnowledgeGraph + query() + to_cypher() + stats()
   reason.py     # reason() / ingest() / diff_briefs() / print_brief_diff()
-  _io.py         # LeRobot v3.0 parquet loader (no lerobot dep)
+  _io.py        # LeRobot v3.0 parquet loader (no lerobot dep)
   _timing.py    # @timed decorator + per-op accumulator
 notebooks/
   demo.ipynb    # end-to-end narrative on real ALOHA episodes
