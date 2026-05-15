@@ -143,8 +143,6 @@ REPO_METADATA: dict[tuple[str, int | None], RepoMetadata] = {
             ),
         ),
     ),
-    # Kept for tests (test_reason.py uses it for cross-skill cases on synthetic
-    # episodes); not currently wired into the demo notebook.
     ("lerobot/aloha_static_thread_velcro", None): RepoMetadata(
         intent=Intent(name="thread-velcro", source="repo_metadata"),
         skills=("fine-bimanual-coordination", "thread", "pinch-grasp"),

@@ -251,6 +251,35 @@ def test_safety_warnings_aggregate_across_target_objects():
     assert "electrical" in warnings_lower
 
 
+def test_safety_warnings_pull_from_all_matched_episode_objects_not_just_targets():
+    """Safety context belongs to the TASK, not just the operator's target_objects.
+
+    A fixture (coffee-machine) the operator doesn't grasp but the task
+    involves still contributes its hazard tags to the brief.
+    """
+    kg = KnowledgeGraph()
+    for i in range(2):
+        kg.add(_make_episode(index=i))   # ingests mug + coffee-machine + filter-pod
+
+    # target_objects deliberately excludes coffee-machine (it's a fixture)
+    brief = reason(
+        kg,
+        intent="brew-coffee",
+        target_objects=("mug",),
+        embodiment="aloha-bimanual",
+    )
+
+    # ObjectKnowledge stays target-scoped: only mug in object_knowledge
+    assert [ok.name for ok in brief.object_knowledge] == ["mug"]
+
+    # Safety surface is task-scoped: contains_liquid (mug), hot_surface +
+    # electrical (coffee-machine, NOT a target) all show up
+    warnings_lower = " ".join(brief.safety_warnings).lower()
+    assert "liquid" in warnings_lower
+    assert ("hot_surface" in warnings_lower) or ("thermal" in warnings_lower)
+    assert "electrical" in warnings_lower
+
+
 def test_unknown_target_object_does_not_crash():
     kg = KnowledgeGraph()
     kg.add(_make_episode())

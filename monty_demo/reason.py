@@ -358,8 +358,12 @@ def reason(
             confidence *= _CROSS_EMB_CONF_DIP
 
     # 8. Apply human priors
+    # ObjectKnowledge + impedance merge: scoped to target_objects only —
+    # those are the things the operator will actually grasp / manipulate, so
+    # their fragility / suggested impedance is what governs how cautiously to
+    # interact. Fixtures (coffee-machine, table) shouldn't drive the grip
+    # impedance you use on the mug.
     object_knowledge: list[ObjectKnowledge] = []
-    safety_set: set[str] = set()
     for obj_name in target_objects:
         attrs = kg.object_attrs(obj_name)
         if attrs is None:
@@ -372,7 +376,15 @@ def reason(
             suggested_impedance=attrs["suggested_impedance"],
         )
         object_knowledge.append(ok)
-        safety_set.update(ok.safety_context)
+
+    # Safety warnings: scoped to the WHOLE TASK — every object in any matched
+    # episode contributes. The coffee-machine is a fixture you don't grasp, but
+    # its hot_surface / electrical hazards still need to be planned around.
+    safety_set: set[str] = set()
+    for ep_id in matched_episodes:
+        for obj_name in kg.objects_of(ep_id):
+            for tag in kg.safety_tags_for_object(obj_name):
+                safety_set.add(tag)
     safety_warnings = [_humanize_safety(t) for t in sorted(safety_set)]
 
     # Merge with the data-driven contact band (or default if no data)
