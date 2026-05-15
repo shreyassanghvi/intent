@@ -89,7 +89,11 @@ REPO_METADATA: dict[tuple[str, int | None], RepoMetadata] = {
     # --- Setup + outlier (same repo, different episode indices) --------------
     ("lerobot/aloha_static_coffee", None): RepoMetadata(
         intent=Intent(name="brew-coffee", source="repo_metadata"),
-        skills=("fine-bimanual-coordination", "place", "press-button"),
+        # 'insert-pod' makes the filter-pod handling step explicit as a skill,
+        # so the cross-skill story (battery → precision-insert / align-and-press
+        # refining this existing step) is visible in the brief without the
+        # audience having to infer it.
+        skills=("fine-bimanual-coordination", "place", "press-button", "insert-pod"),
         objects=(
             ObjectKnowledge(
                 name="mug",

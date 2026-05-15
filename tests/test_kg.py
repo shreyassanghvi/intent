@@ -51,7 +51,7 @@ def test_add_episode_creates_expected_nodes_and_edges():
     assert s["nodes"]["Intent"] == 1
     assert s["nodes"]["Embodiment"] == 1
     assert s["nodes"]["Phase"] == 3
-    assert s["nodes"]["Skill"] == 3      # fine-bimanual-coordination, place, press-button
+    assert s["nodes"]["Skill"] == 4      # fine-bimanual-coordination, place, press-button, insert-pod
     assert s["nodes"]["Object"] == 3     # mug, coffee-machine, filter-pod
     # Coffee REPO_METADATA: contains_liquid + hot_surface + electrical = 3 distinct safety tags
     assert s["nodes"]["SafetyTag"] == 3
@@ -59,7 +59,7 @@ def test_add_episode_creates_expected_nodes_and_edges():
     assert s["edges"]["HAS_INTENT"] == 1
     assert s["edges"]["ON_EMBODIMENT"] == 1
     assert s["edges"]["HAS_PHASE"] == 3
-    assert s["edges"]["USES_SKILL"] == 3
+    assert s["edges"]["USES_SKILL"] == 4
     assert s["edges"]["INVOLVES"] == 3
     assert s["edges"]["HAS_SAFETY_CONTEXT"] == 3
 
@@ -85,7 +85,7 @@ def test_add_multiple_episodes_dedupes_shared_nodes():
     assert s["nodes"]["Intent"] == 1
     assert s["nodes"]["Embodiment"] == 1
     assert s["nodes"]["Object"] == 3      # mug, coffee-machine, filter-pod (shared)
-    assert s["nodes"]["Skill"] == 3       # shared too
+    assert s["nodes"]["Skill"] == 4       # shared too: fine-bimanual + place + press-button + insert-pod
     assert s["nodes"]["SafetyTag"] == 3
 
 
