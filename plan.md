@@ -6,7 +6,7 @@ This is a pitch artifact for **usemonty.com** — a company building "real-world
 
 The single-sentence pitch the demo earns the right to make:
 
-> *"You're already building the lake. This is the reasoning layer on top — past teleop in, structured priors out, every new task starts informed, and the system gets sharper with every attempt."*
+> *"Teach physical AI from human motion — the trajectories AND the world knowledge the human was implicitly using. Past teleop becomes data + priors; every new task starts with both, and the system gets sharper with every attempt."*
 
 The deliverable is a **Python SDK** (no GUI) exercised by a **single Jupyter notebook** that runs end-to-end on real LeRobot ALOHA episodes in under 90 seconds on a laptop. The notebook is the demo vehicle; the SDK is the actual artifact under evaluation.
 
@@ -21,6 +21,7 @@ The deliverable is a **Python SDK** (no GUI) exercised by a **single Jupyter not
 3. **Make the reasoning layer the headline.** `monty.reason(...) -> TaskBrief` is the call Monty stares at; everything else is supporting machinery.
 4. **Demonstrate the self-improvement loop** with three qualitatively different "new attempts" (transfer, calibration, critical sense) so the system visibly gets both more capable and more discerning over time.
 5. **Make speed visible.** Every public op self-times; the notebook prints actual ms per call. Speed is a claim — exposing the numbers turns it into evidence.
+6. **Capture human priors alongside motion data.** Each object the human handled carries the human's implicit knowledge — fragility, mass class, safety context, suggested impedance regime. The reasoner *merges* this human prior with the data-driven `k_hat` band so briefs reflect both what the data showed AND what the human knew. This is the layer that makes the system *teach* physical AI rather than just *describe* trajectories.
 
 ## Non-goals
 
@@ -113,6 +114,17 @@ class Intent(BaseModel):
     source: Literal["repo_metadata", "rule", "manual"] = "repo_metadata"
     confidence: float = 1.0
 
+class ObjectKnowledge(BaseModel):
+    """Human prior on a single object — what the operator implicitly knew while
+    handling it. Combines categorical estimates a human would make at a glance
+    (fragility, mass class) with task-relevant safety context and an impedance
+    regime hint that captures 'how cautiously did I treat this object'."""
+    name: str
+    fragility: Literal["robust", "moderate", "fragile", "very_fragile"]
+    mass_category: Literal["light", "medium", "heavy"]   # <0.2kg / 0.2-2kg / >2kg
+    safety_context: list[str] = Field(default_factory=list)   # e.g. ["contains_liquid", "hot_surface", "electrical", "sharp"]
+    suggested_impedance: Literal["gentle", "compliant", "firm", "stiff"]
+
 class PhasePlan(BaseModel):
     name: PhaseName
     expected_duration_s: float
@@ -136,6 +148,11 @@ class TaskBrief(BaseModel):
     embodiment_diversity: int = 1
     confidence: float
     notes: list[str]
+
+    # --- human-priors layer (the "what the human knew" surface) ---
+    object_knowledge: list[ObjectKnowledge] = []         # priors on every target object
+    recommended_impedance_regime: str = "compliant"      # merge of data-driven k_hat band + human priors
+    safety_warnings: list[str] = []                      # surfaced from object safety_context tags
 
 class BriefDiff(BaseModel):
     matched_before: int
@@ -226,53 +243,62 @@ Vectorized rule-based state machine over `velocity_norm` and `tracking_error = |
 
 Returns 3–6 `PhaseSegment` spans per episode. **Output is spans, not per-frame labels** — phases are intervals; downstream code (KG, queries) wants intervals. Target < 2 ms per episode.
 
-### Intent / skill / object labeler (`intent.py`)
+### Intent / skill / object-knowledge labeler (`intent.py`)
 
-LeRobot episodes don't carry skill or object metadata, so the demo populates all three from a single curated table keyed by `repo_id`. Same honest-framing as the intent label — `source="repo_metadata"` makes the provenance explicit at every call site.
+LeRobot episodes don't carry skill or object metadata, so the demo populates all of it — including the **human-prior `ObjectKnowledge`** for every object the operator handled — from a single curated table keyed by `repo_id`. Same honest-framing as before — `source="repo_metadata"` makes the provenance explicit at every call site, and the per-object `ObjectKnowledge` is exactly the kind of common-sense annotation an operator would jot down without thinking.
 
 ```python
 @dataclass(frozen=True)
 class RepoMetadata:
     intent: Intent
     skills:  tuple[str, ...]
-    objects: tuple[str, ...]
+    objects: tuple[ObjectKnowledge, ...]
 
 REPO_METADATA: dict[str, RepoMetadata] = {
     "lerobot/aloha_static_coffee": RepoMetadata(
         intent=Intent(name="brew-coffee", source="repo_metadata"),
         skills=("fine-bimanual-coordination", "place", "press-button"),
-        objects=("mug", "coffee-machine", "filter-pod"),
+        objects=(
+            ObjectKnowledge(name="mug", fragility="moderate", mass_category="light",
+                            safety_context=["contains_liquid"], suggested_impedance="gentle"),
+            ObjectKnowledge(name="coffee-machine", fragility="robust", mass_category="heavy",
+                            safety_context=["hot_surface", "electrical"], suggested_impedance="firm"),
+            ObjectKnowledge(name="filter-pod", fragility="fragile", mass_category="light",
+                            safety_context=[], suggested_impedance="gentle"),
+        ),
     ),
     "lerobot/aloha_static_thread_velcro": RepoMetadata(
         intent=Intent(name="thread-velcro", source="repo_metadata"),
         skills=("fine-bimanual-coordination", "thread", "pinch-grasp"),
-        objects=("velcro-strap", "cloth"),
+        objects=(
+            ObjectKnowledge(name="velcro-strap", fragility="robust", mass_category="light",
+                            safety_context=[], suggested_impedance="firm"),
+            ObjectKnowledge(name="cloth", fragility="moderate", mass_category="light",
+                            safety_context=[], suggested_impedance="compliant"),
+        ),
     ),
-    "lerobot/koch_pick_place_lego": RepoMetadata(
-        intent=Intent(name="brew-coffee", source="manual", confidence=0.4),  # cross-embodiment hand-label
+    "lerobot/koch_pick_place_lego": RepoMetadata(   # cross-embodiment hand-label
+        intent=Intent(name="brew-coffee", source="manual", confidence=0.4),
         skills=("place", "pick"),
-        objects=("mug",),
+        objects=(
+            ObjectKnowledge(name="mug", fragility="moderate", mass_category="light",
+                            safety_context=["contains_liquid"], suggested_impedance="gentle"),
+        ),
     ),
-    # one more entry covering attempt 3's outlier episode (same repo as setup)
+    # one more entry for attempt 3's outlier episode (same repo as setup)
 }
 
-def infer_intent(ep: Episode) -> Intent:
-    md = REPO_METADATA.get(ep.source.repo_id)
-    if md is None: return Intent(name="unknown", source="rule", confidence=0.0)
-    return md.intent
-
-def infer_skills(ep: Episode) -> tuple[str, ...]:
-    md = REPO_METADATA.get(ep.source.repo_id)
-    return md.skills if md else ()
-
+def infer_intent(ep: Episode) -> Intent: ...
+def infer_skills(ep: Episode) -> tuple[str, ...]: ...
+def infer_object_knowledge(ep: Episode) -> tuple[ObjectKnowledge, ...]: ...
 def infer_objects(ep: Episode) -> tuple[str, ...]:
-    md = REPO_METADATA.get(ep.source.repo_id)
-    return md.objects if md else ()
+    """Names only — convenience for the KG INVOLVES edge."""
+    return tuple(ok.name for ok in infer_object_knowledge(ep))
 ```
 
-`Episode.objects` is populated at ingest time via `infer_objects(ep)`. Skills are written directly to the KG as `Skill` nodes inside `kg.add(ep)` — they don't need to live on the `Episode` itself since the KG is the consumer.
+`Episode.objects` is populated at ingest time via `infer_objects(ep)`. The full `ObjectKnowledge` records are written into the KG as `Object` node attrs (fragility, mass_category, suggested_impedance) and as `SafetyTag` nodes connected via `HAS_SAFETY_CONTEXT` edges so the reasoner can do "find episodes touching liquid-bearing objects" in a single graph hop.
 
-Honest framing in docstring: in production each of intent/skills/objects would come from a model (text-from-prompt, video classifier, operator-tagged) and the cross-embodiment Koch entry would be inferred by similarity; for the demo it's curated lookup so the reasoner's behavior is fully deterministic and inspectable.
+Honest framing in docstring: in production each of intent/skills/object-knowledge would come from a model (text-from-prompt, video classifier, operator-tagged) or a controlled vocabulary the operator picks from at recording time; for the demo it's curated lookup so the reasoner's behavior is fully deterministic and inspectable. The point of the demo isn't to *infer* the human prior — it's to show that, *given* the prior, the reasoner produces materially better briefs.
 
 ---
 
@@ -288,13 +314,14 @@ NetworkX-backed in-memory `MultiDiGraph`. Explicitly framed in the README and no
 | Intent | `intent:{name}` | `name` |
 | Phase | `phase:{episode_id}/{name}/{start_frame}` | `name, start_frame, end_frame, k_lo, k_hi, confidence` |
 | Skill | `skill:{name}` | `name` |
-| Object | `obj:{name}` | `name` |
+| Object | `obj:{name}` | `name, fragility, mass_category, suggested_impedance` |
+| SafetyTag | `safety:{tag}` | `tag` (e.g. `"contains_liquid"`, `"hot_surface"`) |
 | Operator | `op:{id}` | `id` |
 | Embodiment | `emb:{name}` | `name` |
 
 ### Edges
 
-Typed via `kind` attribute on the edge: `HAS_INTENT`, `HAS_PHASE`, `USES_SKILL`, `INVOLVES`, `DEMONSTRATED_BY`, `ON_EMBODIMENT`. All originate at `Episode` nodes.
+Typed via `kind` attribute on the edge: `HAS_INTENT`, `HAS_PHASE`, `USES_SKILL`, `INVOLVES`, `DEMONSTRATED_BY`, `ON_EMBODIMENT` (all originate at `Episode` nodes), plus `HAS_SAFETY_CONTEXT` (`Object → SafetyTag`) so the reasoner can hop from a target object to all safety tags in one query.
 
 Phase nodes are first-class (not edge attrs) because the reasoner aggregates over them by name across episodes — needs `Intent → Episode → Phase{name=contact}` traversal.
 
@@ -348,7 +375,12 @@ def reason(
 
 6. **Confidence.** `min(1.0, 0.2·n_matched + 0.5·(1 - mean(stiffness_band_width)))`, where `n_matched` is the count of episodes whose score exceeded the match threshold (distinct from the `k` cap on top-K). Drops when fewer matches survive or when their stiffness bands are wider/inconsistent. **Confidence can decrease when more data is added** — see calibration attempt below.
 
-7. **Notes.** Human-readable strings derived from above.
+7. **Apply human priors.** For every object in `target_objects`, look up its `ObjectKnowledge` from the KG (or `REPO_METADATA` directly). Then:
+   - **Merge impedance.** Map each `suggested_impedance` to a numeric band — `gentle: (0.0, 0.45)`, `compliant: (0.3, 0.65)`, `firm: (0.5, 0.85)`, `stiff: (0.7, 1.0)`. Take the *intersection* of these per-object prior bands with the data-driven `k_hat` band derived in step 3. The intersection is the `recommended_impedance_regime`; emit it as one of the four labels by which band it falls in. If the intersection is empty (data and human disagree), keep the prior and emit a note: `"data-driven k_hat (X, Y) exceeds human-prior 'gentle' band — investigate; safety priors win for now"`.
+   - **Surface safety.** Union of all `safety_context` tags across target objects → `safety_warnings`. Each tag becomes a human-readable line ("contains_liquid → spill risk during contact phase").
+   - **Attach knowledge.** Copy the per-object `ObjectKnowledge` records into `TaskBrief.object_knowledge` so the brief is self-contained.
+
+8. **Notes.** Human-readable strings derived from above (priors merge, outliers, transferable skills, cross-embodiment hedging).
 
 ### `ingest()` — the closing call of the loop
 
@@ -424,9 +456,10 @@ Single notebook, ~12 cells, runs end-to-end in < 90 s on a laptop after first ca
 7. **Attempt 2 (cross-embodiment):** ingest Koch episode, re-reason, show confidence *drop* with explanation
 8. **Attempt 3 (outlier):** ingest weird-contact coffee episode, show `outlier_phases` warning
 9. **Cumulative diff** — `print_brief_diff(brief_before, brief_final)` — the money shot
-10. **Cypher export** — `print(kg.to_cypher({"intent": "brew-coffee"}))` to signal "this maps to a real graph DB"
-11. **Timing table** — actual ms per public op on this run
-12. **"What this enables"** — 3 bullets, no fluff:
+10. **Human priors in action** — query a brief whose target object is `mug` with `safety_context=["contains_liquid"]`. Print the data-driven `k_hat` band, the human-prior `suggested_impedance` band, and the merged `recommended_impedance_regime`. Show the `safety_warnings`. The point: human knowledge tightens the brief beyond what pure data could.
+11. **Cypher export** — `print(kg.to_cypher({"intent": "brew-coffee"}))` to signal "this maps to a real graph DB"
+12. **Timing table** — actual ms per public op on this run
+13. **"What this enables"** — 3 bullets, no fluff:
     - Every new task starts with retrieved priors instead of cold.
     - Cross-task transfer is structural, not just label-based.
     - Bad new data is flagged before it pollutes downstream training.
@@ -465,7 +498,7 @@ All tests run in < 5 s total via `pytest`. Four files keep coverage tight withou
 
 - **`test_encode_segment.py`** — stiffness bounds + monotonicity on synthetic arrays; segmenter returns expected segment count and ordering on synthetic velocity/error traces.
 - **`test_kg.py`** — add 3 synthetic episodes (with metadata); query each edge type; verify counts; verify idempotency on re-add; verify `to_cypher()` emits a syntactically-shaped `MATCH ... RETURN ...` string.
-- **`test_reason.py`** — covers reasoner + outlier together: (a) ingest 2 same-intent synthetic episodes then a 3rd; verify confidence rises and `BriefDiff.tightened_phases` contains `"contact"`. (b) Ingest a 4th whose contact phase is 2.5σ longer than baseline; verify `BriefDiff.outlier_phases` contains a `PhaseOutlier` with `severity="warning"`. (c) Ingest a cross-embodiment episode; verify confidence drops despite `n_matched` rising.
+- **`test_reason.py`** — covers reasoner + outlier + priors together: (a) ingest 2 same-intent synthetic episodes then a 3rd; verify confidence rises and `BriefDiff.tightened_phases` contains `"contact"`. (b) Ingest a 4th whose contact phase is 2.5σ longer than baseline; verify `BriefDiff.outlier_phases` contains a `PhaseOutlier` with `severity="warning"`. (c) Ingest a cross-embodiment episode; verify confidence drops despite `n_matched` rising. (d) Reason about a task with a fragile/liquid-bearing object; verify `recommended_impedance_regime` is tightened compared to pure data-driven, `safety_warnings` includes `"contains_liquid"`-derived note, and `object_knowledge` is populated.
 - **`test_pipeline.py`** — full `ingest()` on `fixtures/episode_aloha_coffee_004.parquet` (checked-in ~4 KB slice); assert `Episode` is fully populated, KG has expected node/edge counts, and `reason(intent="brew-coffee")` returns a non-empty TaskBrief.
 
 The fixture is generated once by a separate `scripts/build_fixture.py` (not part of the test path) so tests are fully offline.
@@ -497,9 +530,9 @@ After implementation:
 | `monty_demo/episode.py` | Episode dataclass + loader | ~120 |
 | `monty_demo/encode.py` | `estimate_stiffness` + EMA helper | ~40 |
 | `monty_demo/segment.py` | Vectorized phase segmenter | ~80 |
-| `monty_demo/intent.py` | Lookup table (intent + skills + objects) + `infer_*` | ~60 |
-| `monty_demo/kg.py` | KnowledgeGraph + query + to_cypher | ~150 |
-| `monty_demo/reason.py` | reason + ingest + diff helpers + outlier check | ~180 |
+| `monty_demo/intent.py` | Lookup table (intent + skills + ObjectKnowledge) + `infer_*` | ~110 |
+| `monty_demo/kg.py` | KnowledgeGraph + query + to_cypher (incl. SafetyTag nodes) | ~170 |
+| `monty_demo/reason.py` | reason + ingest + diff helpers + outlier check + human-prior merge | ~220 |
 | `monty_demo/_io.py` | HF parquet loading | ~50 |
 | `monty_demo/_timing.py` | @timed decorator + accumulator | ~30 |
 | `monty_demo/__init__.py` | Re-exports | ~20 |
@@ -509,7 +542,7 @@ After implementation:
 | `pyproject.toml` | Pinned deps | — |
 | `README.md` | The pitch + how to run | ~80 |
 
-Total: ~1,200 LOC of source + ~200 of tests + 1 notebook. Comfortable in a 6–8 hour build.
+Total: ~1,300 LOC of source + ~220 of tests + 1 notebook. Comfortable in a 7–9 hour build (+~1.5 hrs vs prior estimate for the human-priors layer).
 
 ---
 
@@ -535,6 +568,7 @@ Total: ~1,200 LOC of source + ~200 of tests + 1 notebook. Comfortable in a 6–8
 - **`k_hat` is not real impedance.** Stated in every docstring, plot label, and brief field name. The honest framing is part of the pitch, not a weakness.
 - **Outlier detection is z-score on duration only**, not on k_hat profile shape or phase ordering. Could be extended; for 1-day scope this is enough to demonstrate the capability.
 - **3-episode initial KG is small** for statistical claims. The demo says "this is a sketch" up front; production would have hundreds.
+- **Human priors are hand-curated** in `REPO_METADATA`. In production they'd come from a controlled vocabulary picked by the operator at recording time, an object-classifier model, or a task-spec the operator wrote. The demo is *not* about inferring priors — it's about showing the value of *having* them once they exist. Documented in the README.
 
 ---
 

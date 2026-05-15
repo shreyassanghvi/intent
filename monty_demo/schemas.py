@@ -35,6 +35,36 @@ class Intent(BaseModel):
     confidence: float = 1.0
 
 
+class ObjectKnowledge(BaseModel):
+    """Human prior on a single object — what the operator implicitly knew while
+    handling it. Combines categorical estimates a human makes at a glance
+    (fragility, mass class) with task-relevant safety context and an impedance
+    regime hint capturing 'how cautiously did I treat this object'.
+
+    In production these would come from a controlled vocabulary the operator
+    picks at recording time, an object-classifier model, or a task spec.
+    For the demo they're curated; the point isn't to *infer* the prior but to
+    show that, *given* a prior, the reasoner produces materially better briefs.
+    """
+
+    name: str
+    fragility: Literal["robust", "moderate", "fragile", "very_fragile"]
+    mass_category: Literal["light", "medium", "heavy"]   # <0.2kg / 0.2-2kg / >2kg
+    safety_context: list[str] = Field(default_factory=list)  # e.g. ["contains_liquid", "hot_surface"]
+    suggested_impedance: Literal["gentle", "compliant", "firm", "stiff"]
+
+
+# Numeric bands for each impedance regime. The reasoner intersects these with
+# the data-driven k_hat band from prior episodes to produce the merged
+# `recommended_impedance_regime` on a TaskBrief.
+IMPEDANCE_BANDS: dict[str, tuple[float, float]] = {
+    "gentle":    (0.00, 0.45),
+    "compliant": (0.30, 0.65),
+    "firm":      (0.50, 0.85),
+    "stiff":     (0.70, 1.00),
+}
+
+
 class PhasePlan(BaseModel):
     name: PhaseName
     expected_duration_s: float
@@ -60,6 +90,11 @@ class TaskBrief(BaseModel):
     embodiment_diversity: int = 1
     confidence: float
     notes: list[str] = Field(default_factory=list)
+
+    # --- human-priors layer (the "what the human knew" surface) ---
+    object_knowledge: list[ObjectKnowledge] = Field(default_factory=list)
+    recommended_impedance_regime: str = "compliant"   # merge of data-driven k_hat band + human priors
+    safety_warnings: list[str] = Field(default_factory=list)
 
 
 class BriefDiff(BaseModel):

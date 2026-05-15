@@ -5,9 +5,11 @@ closes the self-improvement loop. Everything else is supporting machinery.
 """
 
 from monty_demo.schemas import (
+    IMPEDANCE_BANDS,
     BriefDiff,
     EpisodeSource,
     Intent,
+    ObjectKnowledge,
     PhaseName,
     PhaseOutlier,
     PhasePlan,
@@ -26,8 +28,10 @@ __all__ = [
     "BriefDiff",
     "Episode",
     "EpisodeSource",
+    "IMPEDANCE_BANDS",
     "Intent",
     "KnowledgeGraph",
+    "ObjectKnowledge",
     "PhaseName",
     "PhaseOutlier",
     "PhasePlan",
