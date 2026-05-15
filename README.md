@@ -171,15 +171,16 @@ A few things this demo *does not* claim, and the README states them up front bec
 
 ## Performance budgets (visible in the notebook's timing cell)
 
-| Operation | Target | Notes |
+| Operation | Typical | Notes |
 |---|---|---|
-| `Episode.from_lerobot` | < 300 ms | After HF cache populated; dominated by parquet read + meta-shard walk |
-| `estimate_stiffness` | < 5 ms | 250 frames × 14 DOF; effort-fusion path adds a single percentile pass |
-| `segment_phases` | < 2 ms | Vectorized state machine over smoothed velocity / tracking-error |
+| `Episode.from_lerobot` | median ~250 ms, p95 ~520 ms | After HF cache populated; dominated by parquet read + meta-shard walk. Wide tail because the meta walk hits one extra HTTP call when the cache is partial. |
+| `estimate_stiffness` | < 1 ms | 250 frames × 14 DOF; effort-fusion path adds a single percentile pass |
+| `segment_phases` | < 1 ms | Vectorized state machine over smoothed velocity / tracking-error |
 | `kg.add(episode)` | < 1 ms | Single-episode insert into the in-memory MultiDiGraph |
-| `reason(...)` | < 10 ms | Over the demo's ~5-episode KG; scales O(\|episodes\|) |
+| `reason(...)` | < 5 ms | Over the demo's ~5-episode KG; scales O(\|episodes\|) |
+| `ingest(...)` | < 5 ms | End-to-end pipeline (excluding HF download) |
 
-Speed is a claim — the notebook prints actual ms per public op so you can verify.
+Speed is a claim — the notebook prints actual ms per public op so you can verify. Numbers above are from a fresh `nbconvert --execute` on a Windows laptop.
 
 ---
 
