@@ -126,8 +126,10 @@ def _load_episode_meta(repo_id: str, index: int, chunks_size: int) -> dict:
                 "dataset_to_index": int(row["dataset_to_index"]),
                 "length": int(row["length"]),
             }
-        # Walk to the next meta shard if this dataset has more
-        if df["episode_index"].max() < index:
+        # Walk to the next meta shard if this dataset has more. df.empty
+        # short-circuits the .max() NaN comparison (NaN < index returns False
+        # in pandas, which would falsely terminate the walk on an empty shard).
+        if df.empty or df["episode_index"].max() < index:
             meta_file += 1
             if meta_file >= chunks_size:
                 meta_file = 0
