@@ -92,6 +92,61 @@ plan.md         # full design spec
 
 ---
 
+## Extending the demo to a new LeRobot dataset
+
+Adding a new dataset is a **single edit to `monty_demo/intent.py`** — no other code changes. The schema is the contract; everything else (KG ingestion, reasoning, brief generation, safety surface) reads from it transparently.
+
+```python
+# monty_demo/intent.py
+REPO_METADATA: dict[str, RepoMetadata] = {
+    # ... existing entries ...
+
+    "lerobot/<your_dataset>": RepoMetadata(
+        intent=Intent(name="<task-name>", source="repo_metadata"),
+        skills=("<skill-1>", "<skill-2>", ...),
+        objects=(
+            ObjectKnowledge(
+                name="<object-name>",
+                fragility="moderate",            # see valid values below
+                mass_category="light",
+                safety_context=["<tag>", ...],   # see recognized tags below
+                suggested_impedance="gentle",
+            ),
+            # ... one ObjectKnowledge per object the operator handled ...
+        ),
+    ),
+}
+```
+
+Then anywhere in your code (or the notebook):
+```python
+ep = Episode.from_lerobot("lerobot/<your_dataset>", index=0)
+ingest(kg, ep)                                     # full pipeline runs
+brief = reason(kg, intent="<task-name>", ...)      # brief reflects the new entry
+```
+
+### Valid values
+
+| Field | Allowed values |
+|---|---|
+| `Intent.source` | `"repo_metadata"` (curated), `"rule"` (heuristic), `"manual"` (operator hand-label) |
+| `fragility` | `"robust"`, `"moderate"`, `"fragile"`, `"very_fragile"` |
+| `mass_category` | `"light"` (< 0.2 kg), `"medium"` (0.2–2 kg), `"heavy"` (> 2 kg) |
+| `suggested_impedance` | `"gentle"`, `"compliant"`, `"firm"`, `"stiff"` (each maps to a numeric `(lo, hi)` band in `IMPEDANCE_BANDS`) |
+| `safety_context` (recognized — others fall back to generic `"{tag} → caution"`) | `"contains_liquid"`, `"hot_surface"`, `"electrical"`, `"sharp"` |
+
+### Cross-embodiment / hand-labeled entries
+
+If you're tagging a dataset whose intent doesn't actually match the rest of your KG (the way `lerobot/koch_pick_place_5_lego` is hand-labeled `brew-coffee` for the cross-embodiment demo), use:
+
+```python
+intent=Intent(name="brew-coffee", source="manual", confidence=0.4),
+```
+
+The reasoner doesn't act on `confidence` directly today, but it's there for when the consuming layer wants to weight by provenance. The cross-embodiment penalty (`*0.6` on the score, `*0.85` on the final confidence) handles the "less reliable" property automatically.
+
+---
+
 ## Honest framing
 
 A few things this demo *does not* claim, and the README states them up front because the pitch lives or dies on this honesty:

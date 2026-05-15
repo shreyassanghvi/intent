@@ -12,6 +12,43 @@ For the demo it's a curated lookup so the reasoner's behavior is fully
 deterministic and inspectable. The point of the demo isn't to *infer* the human
 prior — it's to show that, *given* the prior, the reasoner produces materially
 better briefs.
+
+──────────────────────────────────────────────────────────────────────────────
+Adding a new dataset — copy-paste template
+──────────────────────────────────────────────────────────────────────────────
+
+    "lerobot/<your_dataset>": RepoMetadata(
+        intent=Intent(name="<task-name>", source="repo_metadata"),
+        skills=("<skill-1>", "<skill-2>"),
+        objects=(
+            ObjectKnowledge(
+                name="<object-name>",
+                fragility="moderate",
+                mass_category="light",
+                safety_context=["<tag>"],
+                suggested_impedance="gentle",
+            ),
+        ),
+    ),
+
+Valid values:
+    Intent.source         "repo_metadata" | "rule" | "manual"
+    fragility             "robust" | "moderate" | "fragile" | "very_fragile"
+    mass_category         "light" (<0.2kg) | "medium" (0.2-2kg) | "heavy" (>2kg)
+    suggested_impedance   "gentle" | "compliant" | "firm" | "stiff"
+                          (each maps to a numeric band in schemas.IMPEDANCE_BANDS)
+    safety_context        any list of strings; the four recognized tags get
+                          human-readable explanations in TaskBrief.safety_warnings:
+                            "contains_liquid"  → "spill risk during contact phase"
+                            "hot_surface"      → "thermal-rated end-effector required"
+                            "electrical"       → "de-energize before contact"
+                            "sharp"            → "puncture risk; prefer pinch grasp"
+                          Other tags fall back to "{tag} → caution".
+
+After editing, ``Episode.from_lerobot("lerobot/<your_dataset>", index=N)``
+followed by ``ingest(kg, ep)`` runs the full pipeline against the new entry
+with NO other code changes — the KG, reasoner, and brief surface adapt
+automatically because they read everything via the schemas.
 """
 
 from __future__ import annotations
