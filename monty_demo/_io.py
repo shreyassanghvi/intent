@@ -107,37 +107,29 @@ def _column_to_array(series: pd.Series, name: str) -> np.ndarray:
 def _load_episode_meta(repo_id: str, index: int, chunks_size: int) -> dict:
     """Locate the per-episode meta row, walking meta/episodes shards. For
     typical demo datasets (≤ chunks_size episodes total) this hits one file."""
-    meta_chunk = 0
-    meta_file = 0
-    while True:
-        rel = _META_EPISODES_PATH.format(chunk_index=meta_chunk, file_index=meta_file)
-        try:
-            path = hf_hub_download(repo_id=repo_id, filename=rel, repo_type="dataset")
-        except Exception as e:
-            raise EpisodeNotFoundError(repo_id, index) from e
-        df = pd.read_parquet(path)
-        match = df[df["episode_index"] == index]
-        if not match.empty:
-            row = match.iloc[0]
-            return {
-                "data_chunk_index": int(row["data/chunk_index"]),
-                "data_file_index": int(row["data/file_index"]),
-                "dataset_from_index": int(row["dataset_from_index"]),
-                "dataset_to_index": int(row["dataset_to_index"]),
-                "length": int(row["length"]),
-            }
-        # Walk to the next meta shard if this dataset has more. df.empty
-        # short-circuits the .max() NaN comparison (NaN < index returns False
-        # in pandas, which would falsely terminate the walk on an empty shard).
-        if df.empty or df["episode_index"].max() < index:
-            meta_file += 1
-            if meta_file >= chunks_size:
-                meta_file = 0
-                meta_chunk += 1
-                if meta_chunk > 100:   # sanity bound for demo
-                    raise EpisodeNotFoundError(repo_id, index)
-            continue
-        raise EpisodeNotFoundError(repo_id, index)
+    for meta_chunk in range(101):           # sanity bound for demo
+        for meta_file in range(chunks_size):
+            rel = _META_EPISODES_PATH.format(chunk_index=meta_chunk, file_index=meta_file)
+            try:
+                path = hf_hub_download(repo_id=repo_id, filename=rel, repo_type="dataset")
+            except Exception as e:
+                raise EpisodeNotFoundError(repo_id, index) from e
+            df = pd.read_parquet(path)
+            match = df[df["episode_index"] == index]
+            if not match.empty:
+                row = match.iloc[0]
+                return {
+                    "data_chunk_index": int(row["data/chunk_index"]),
+                    "data_file_index": int(row["data/file_index"]),
+                    "dataset_from_index": int(row["dataset_from_index"]),
+                    "dataset_to_index": int(row["dataset_to_index"]),
+                    "length": int(row["length"]),
+                }
+            # df.empty short-circuits .max() — NaN < index is False in pandas,
+            # which would falsely terminate the walk on an empty shard.
+            if not df.empty and df["episode_index"].max() >= index:
+                raise EpisodeNotFoundError(repo_id, index)
+    raise EpisodeNotFoundError(repo_id, index)
 
 
 @timed("monty_demo._io.load_lerobot_episode")

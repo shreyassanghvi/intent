@@ -145,21 +145,22 @@ class KnowledgeGraph:
             if attrs.get("kind") == edge_kind
         ]
 
+    def _neighbor_attrs(self, ep_id: str, edge_kind: str, attr: str) -> list[str]:
+        return [self._g.nodes[n].get(attr) for n in self._neighbors_of_kind(ep_id, edge_kind)]
+
     def intent_of(self, ep_id: str) -> str | None:
-        for nid in self._neighbors_of_kind(ep_id, "HAS_INTENT"):
-            return self._g.nodes[nid].get("name")
-        return None
+        names = self._neighbor_attrs(ep_id, "HAS_INTENT", "name")
+        return names[0] if names else None
 
     def embodiment_of(self, ep_id: str) -> str | None:
-        for nid in self._neighbors_of_kind(ep_id, "ON_EMBODIMENT"):
-            return self._g.nodes[nid].get("name")
-        return None
+        names = self._neighbor_attrs(ep_id, "ON_EMBODIMENT", "name")
+        return names[0] if names else None
 
     def skills_of(self, ep_id: str) -> list[str]:
-        return [self._g.nodes[n].get("name") for n in self._neighbors_of_kind(ep_id, "USES_SKILL")]
+        return self._neighbor_attrs(ep_id, "USES_SKILL", "name")
 
     def objects_of(self, ep_id: str) -> list[str]:
-        return [self._g.nodes[n].get("name") for n in self._neighbors_of_kind(ep_id, "INVOLVES")]
+        return self._neighbor_attrs(ep_id, "INVOLVES", "name")
 
     def phases_of(self, ep_id: str) -> list[dict]:
         """Return phase-node attribute dicts for an episode."""

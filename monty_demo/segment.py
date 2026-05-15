@@ -45,13 +45,10 @@ def _coalesce_same_name(segments: list[PhaseSegment]) -> list[PhaseSegment]:
     for seg in segments[1:]:
         prev = out[-1]
         if seg.name == prev.name and seg.start_frame == prev.end_frame + 1:
-            out[-1] = PhaseSegment(
-                name=prev.name,
-                start_frame=prev.start_frame,
-                end_frame=seg.end_frame,
-                confidence=min(prev.confidence, seg.confidence),
-                source=prev.source,
-            )
+            out[-1] = prev.model_copy(update={
+                "end_frame": seg.end_frame,
+                "confidence": min(prev.confidence, seg.confidence),
+            })
         else:
             out.append(seg)
     return out
@@ -65,35 +62,20 @@ def _merge_tiny(segments: list[PhaseSegment], min_len: int) -> list[PhaseSegment
     while changed and len(segments) > 1:
         changed = False
         for i, seg in enumerate(segments):
-            length = seg.end_frame - seg.start_frame + 1
-            if length >= min_len:
+            if seg.end_frame - seg.start_frame + 1 >= min_len:
                 continue
-            # Pick the longer neighbor to absorb into
             left = segments[i - 1] if i > 0 else None
             right = segments[i + 1] if i < len(segments) - 1 else None
             if left and right:
                 target = left if (left.end_frame - left.start_frame) >= (right.end_frame - right.start_frame) else right
             else:
                 target = left or right
+            assert target is not None  # len > 1 guarantees at least one neighbor
             if target is left:
-                segments[i - 1] = PhaseSegment(
-                    name=left.name,
-                    start_frame=left.start_frame,
-                    end_frame=seg.end_frame,
-                    confidence=left.confidence,
-                    source=left.source,
-                )
-                segments.pop(i)
+                segments[i - 1] = target.model_copy(update={"end_frame": seg.end_frame})
             else:
-                assert target is right
-                segments[i + 1] = PhaseSegment(
-                    name=right.name,
-                    start_frame=seg.start_frame,
-                    end_frame=right.end_frame,
-                    confidence=right.confidence,
-                    source=right.source,
-                )
-                segments.pop(i)
+                segments[i + 1] = target.model_copy(update={"start_frame": seg.start_frame})
+            segments.pop(i)
             changed = True
             break
     return segments

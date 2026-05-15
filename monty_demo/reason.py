@@ -90,11 +90,12 @@ def _detect_phase_outliers(kg: KnowledgeGraph, ep: Episode) -> list[PhaseOutlier
         z = abs(new_dur - mean) / std
         if z < _OUTLIER_Z_INFO:
             continue
-        severity = (
-            "alert" if z >= _OUTLIER_Z_ALERT
-            else "warning" if z >= _OUTLIER_Z_WARNING
-            else "info"
-        )
+        if z >= _OUTLIER_Z_ALERT:
+            severity = "alert"
+        elif z >= _OUTLIER_Z_WARNING:
+            severity = "warning"
+        else:
+            severity = "info"
         out.append(
             PhaseOutlier(
                 episode_id=ep.episode_id,
@@ -173,28 +174,23 @@ def _aggregate_phase_plan(
     band_widths: list[float] = []
     threshold = max(1, (len(top_ep_ids) + 1) // 2)
     for phase_name in ("approach", "contact", "manipulate", "retract", "recover"):
-        durations: list[float] = []
-        k_los: list[float] = []
-        k_his: list[float] = []
+        samples: list[tuple[float, float, float]] = []
         for ep_id in top_ep_ids:
             for p in kg.phases_of(ep_id):
                 if p.get("name") == phase_name:
-                    durations.append(p.get("duration_s", 0.0))
-                    k_los.append(p.get("k_lo", 0.0))
-                    k_his.append(p.get("k_hi", 0.0))
-                    break  # one per episode
-        n_supporting = len(durations)
-        if n_supporting < threshold:
+                    samples.append((p["duration_s"], p["k_lo"], p["k_hi"]))
+                    break   # one per episode
+        if len(samples) < threshold:
             continue
-        med = float(np.median(durations))
-        lo = float(np.percentile(k_los, 25)) if k_los else 0.0
-        hi = float(np.percentile(k_his, 75)) if k_his else 0.0
+        durations, k_los, k_his = zip(*samples)
+        lo = float(np.percentile(k_los, 25))
+        hi = float(np.percentile(k_his, 75))
         plan.append(
             PhasePlan(
                 name=phase_name,                                  # type: ignore[arg-type]
-                expected_duration_s=round(med, 3),
+                expected_duration_s=round(float(np.median(durations)), 3),
                 suggested_k_hat_band=(round(lo, 3), round(hi, 3)),
-                n_supporting_episodes=n_supporting,
+                n_supporting_episodes=len(samples),
             )
         )
         band_widths.append(max(0.0, hi - lo))
@@ -513,7 +509,12 @@ def print_brief_diff(
         lines.append(
             f"{name:<8} stiffness band:  {before_b} → {after_b}   [tightened]"
         )
-    delta_arrow = "↑" if d.confidence_delta > 0 else ("↓" if d.confidence_delta < 0 else "·")
+    if d.confidence_delta > 0:
+        delta_arrow = "↑"
+    elif d.confidence_delta < 0:
+        delta_arrow = "↓"
+    else:
+        delta_arrow = "·"
     lines.append(
         f"confidence:              {before.confidence} → {after.confidence}   "
         f"({delta_arrow} {d.confidence_delta:+.3f})"
@@ -534,10 +535,8 @@ def print_brief_diff(
             f"recommended_impedance:   {before.recommended_impedance_regime} → "
             f"{after.recommended_impedance_regime}"
         )
-    if set(after.safety_warnings) - set(before.safety_warnings):
-        new_safety = sorted(set(after.safety_warnings) - set(before.safety_warnings))
-        for s in new_safety:
-            lines.append(f"new safety warning:      {s}")
+    for s in sorted(set(after.safety_warnings) - set(before.safety_warnings)):
+        lines.append(f"new safety warning:      {s}")
     out = "\n".join(lines)
     print(out)
     return out

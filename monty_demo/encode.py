@@ -60,27 +60,23 @@ def estimate_stiffness(
     if T < 2:
         return np.zeros(T, dtype=np.float32)
 
+    def _smooth01(raw: np.ndarray) -> np.ndarray:
+        return np.clip(_ema(raw.astype(np.float32), alpha=0.3), 0.0, 1.0)
+
     # --- Kinematic proxy (always) ---
     commanded_motion = np.linalg.norm(np.diff(actions, axis=0), axis=1)
     observed_motion = np.linalg.norm(np.diff(positions, axis=0), axis=1)
-    eps = 1e-4
-    raw = (commanded_motion - observed_motion) / (commanded_motion + eps)
-    raw = np.concatenate([[raw[0]], raw])
-    k_kinematic = np.clip(_ema(raw.astype(np.float32), alpha=0.3), 0.0, 1.0)
+    raw = (commanded_motion - observed_motion) / (commanded_motion + 1e-4)
+    k_kinematic = _smooth01(np.concatenate([[raw[0]], raw]))
 
-    if effort is None or effort.size == 0:
+    if effort is None or effort.size == 0 or effort.shape != positions.shape:
         return k_kinematic.astype(np.float32)
 
-    # --- Effort proxy (when available) ---
-    if effort.shape != positions.shape:
-        # Shape mismatch is non-fatal: log-equivalent fall-through to kinematic
-        return k_kinematic.astype(np.float32)
+    # --- Effort proxy: robust 95th-percentile normalization (a single
+    # current-sensing spike shouldn't compress the rest of the trace to 0..0.1) ---
     eff_mag = np.linalg.norm(effort, axis=1)
-    # Robust normalization: 95th percentile, not max (a single spike from
-    # current-sensing noise shouldn't compress the rest of the trace into 0..0.1)
     eff_ref = float(np.percentile(eff_mag, 95)) + 1e-6
-    eff_norm = np.clip(eff_mag / eff_ref, 0.0, 1.0)
-    k_effort = _ema(eff_norm.astype(np.float32), alpha=0.3)
+    k_effort = _smooth01(eff_mag / eff_ref)
 
     # --- Fusion: effort-dominant, kinematic as safety net ---
     return np.clip(0.6 * k_effort + 0.4 * k_kinematic, 0.0, 1.0).astype(np.float32)
