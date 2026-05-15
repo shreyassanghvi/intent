@@ -98,10 +98,11 @@ Adding a new dataset is a **single edit to `monty_demo/intent.py`** — no other
 
 ```python
 # monty_demo/intent.py
-REPO_METADATA: dict[str, RepoMetadata] = {
+REPO_METADATA: dict[tuple[str, int | None], RepoMetadata] = {
     # ... existing entries ...
 
-    "lerobot/<your_dataset>": RepoMetadata(
+    # Per-repo default (applies to every episode unless overridden)
+    ("lerobot/<your_dataset>", None): RepoMetadata(
         intent=Intent(name="<task-name>", source="repo_metadata"),
         skills=("<skill-1>", "<skill-2>", ...),
         objects=(
@@ -115,8 +116,17 @@ REPO_METADATA: dict[str, RepoMetadata] = {
             # ... one ObjectKnowledge per object the operator handled ...
         ),
     ),
+
+    # Optional per-episode override (uses the same shape, applies only to one episode)
+    ("lerobot/<your_dataset>", 7): RepoMetadata(
+        intent=Intent(name="<different-task>", source="manual", confidence=0.7),
+        skills=(...),
+        objects=(...),
+    ),
 }
 ```
+
+Lookup order is per-episode-specific first, repo-level default second — so adding a per-episode override never breaks the dataset's default behavior.
 
 Then anywhere in your code (or the notebook):
 ```python

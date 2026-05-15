@@ -2,9 +2,20 @@
 
 LeRobot episodes don't carry intent/skill/object metadata. We populate all of
 it — including the human-prior ``ObjectKnowledge`` for every object the operator
-handled — from this single table keyed by ``repo_id``. Provenance is explicit:
-``Intent.source`` records whether a label came from repo metadata, a rule, or
-a manual hand-label.
+handled — from this single table keyed by ``(repo_id, episode_index)``.
+Provenance is explicit: ``Intent.source`` records whether a label came from
+repo metadata, a rule, or a manual hand-label.
+
+The key shape ``(repo_id, episode_index | None)`` supports two patterns:
+
+* ``(repo_id, None)`` — **per-repo default**: applies to every episode in the
+  dataset unless overridden. Most entries are defaults.
+* ``(repo_id, N)`` — **per-episode override**: applies to one specific episode
+  only. Useful when a dataset contains multiple tasks (different episodes ran
+  different intents), or when a particular recording's labels need correction.
+
+Lookup order: per-episode key first, repo-level default second, ``unknown``
+if neither matches.
 
 In production each of these would come from a controlled vocabulary picked at
 recording time, an object-classifier model, or an operator-authored task spec.
@@ -17,7 +28,8 @@ better briefs.
 Adding a new dataset — copy-paste template
 ──────────────────────────────────────────────────────────────────────────────
 
-    "lerobot/<your_dataset>": RepoMetadata(
+    # Default for all episodes in this dataset
+    ("lerobot/<your_dataset>", None): RepoMetadata(
         intent=Intent(name="<task-name>", source="repo_metadata"),
         skills=("<skill-1>", "<skill-2>"),
         objects=(
@@ -29,6 +41,13 @@ Adding a new dataset — copy-paste template
                 suggested_impedance="gentle",
             ),
         ),
+    ),
+
+    # Optional per-episode override (e.g. episode 7 is a different task)
+    ("lerobot/<your_dataset>", 7): RepoMetadata(
+        intent=Intent(name="<other-task>", source="manual", confidence=0.7),
+        skills=(...),
+        objects=(...),
     ),
 
 Valid values:
@@ -66,9 +85,9 @@ class RepoMetadata:
     objects: tuple[ObjectKnowledge, ...]
 
 
-REPO_METADATA: dict[str, RepoMetadata] = {
+REPO_METADATA: dict[tuple[str, int | None], RepoMetadata] = {
     # --- Setup + outlier (same repo, different episode indices) --------------
-    "lerobot/aloha_static_coffee": RepoMetadata(
+    ("lerobot/aloha_static_coffee", None): RepoMetadata(
         intent=Intent(name="brew-coffee", source="repo_metadata"),
         skills=("fine-bimanual-coordination", "place", "press-button"),
         objects=(
@@ -100,7 +119,7 @@ REPO_METADATA: dict[str, RepoMetadata] = {
     # crucially adds 'precision-insert' and 'align-and-press' — exactly the
     # primitives needed for filter-pod insertion. The reasoner surfaces these
     # as transferable skills for future brew-coffee briefs.
-    "lerobot/aloha_static_battery": RepoMetadata(
+    ("lerobot/aloha_static_battery", None): RepoMetadata(
         intent=Intent(name="insert-battery", source="repo_metadata"),
         skills=("fine-bimanual-coordination", "precision-insert", "align-and-press"),
         objects=(
@@ -122,7 +141,7 @@ REPO_METADATA: dict[str, RepoMetadata] = {
     ),
     # Kept for tests (test_reason.py uses it for cross-skill cases on synthetic
     # episodes); not currently wired into the demo notebook.
-    "lerobot/aloha_static_thread_velcro": RepoMetadata(
+    ("lerobot/aloha_static_thread_velcro", None): RepoMetadata(
         intent=Intent(name="thread-velcro", source="repo_metadata"),
         skills=("fine-bimanual-coordination", "thread", "pinch-grasp"),
         objects=(
@@ -143,7 +162,7 @@ REPO_METADATA: dict[str, RepoMetadata] = {
         ),
     ),
     # --- Attempt 2: cross-embodiment (single-arm, hand-labeled adjacent) -----
-    "lerobot/koch_pick_place_5_lego": RepoMetadata(
+    ("lerobot/koch_pick_place_5_lego", None): RepoMetadata(
         intent=Intent(name="brew-coffee", source="manual", confidence=0.4),
         skills=("place", "pick"),
         objects=(
@@ -159,8 +178,21 @@ REPO_METADATA: dict[str, RepoMetadata] = {
 }
 
 
+def get_metadata(repo_id: str, episode_index: int | None = None) -> RepoMetadata | None:
+    """Look up metadata for an episode.
+
+    Per-episode override first (``(repo_id, episode_index)``), then per-repo
+    default (``(repo_id, None)``). Returns ``None`` if neither key is present.
+    """
+    if episode_index is not None:
+        specific = REPO_METADATA.get((repo_id, episode_index))
+        if specific is not None:
+            return specific
+    return REPO_METADATA.get((repo_id, None))
+
+
 def _md(ep: Episode) -> RepoMetadata | None:
-    return REPO_METADATA.get(ep.source.repo_id)
+    return get_metadata(ep.source.repo_id, ep.source.index)
 
 
 def infer_intent(ep: Episode) -> Intent:
