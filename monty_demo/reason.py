@@ -216,26 +216,45 @@ def _intersect_bands(a: tuple[float, float], b: tuple[float, float]) -> tuple[fl
     return (lo, hi) if hi >= lo else None
 
 
+_REGIME_ORDER = ["gentle", "compliant", "firm", "stiff"]  # cautious → assertive
+
+
+def _most_cautious_regime(regimes: list[str]) -> str:
+    """Of a set of regime labels, return the gentlest (lowest in the order)."""
+    return min(regimes, key=_REGIME_ORDER.index)
+
+
 def _merge_impedance(
     data_band: tuple[float, float], object_knowledge: list[ObjectKnowledge]
 ) -> tuple[str, str | None]:
-    """Returns (regime_label, conflict_note_or_None)."""
+    """Merge a data-driven k_hat band with per-object human priors.
+
+    Strategy: try to find a band that respects *all* priors AND the data
+    (successive intersection). If any pair of priors / data has no overlap,
+    fall back to the **most cautious** prior across all target objects —
+    the safety-biased default that's order-independent and predictable.
+
+    Returns (regime_label, conflict_note_or_None).
+    """
     if not object_knowledge:
         return _band_midpoint_to_regime(data_band), None
-    # Intersect the data band with each per-object prior band; result is the
-    # tightest common band. If empty, prior wins (safety bias) + emit a note.
+
     band = data_band
+    conflicts: list[str] = []
     for ok in object_knowledge:
         prior = IMPEDANCE_BANDS.get(ok.suggested_impedance, _DEFAULT_CONTACT_BAND)
         intersection = _intersect_bands(band, prior)
         if intersection is None:
-            # Conflict: data exceeds the prior. Keep the prior; flag it.
-            return ok.suggested_impedance, (
-                f"data-driven k_hat {tuple(round(x, 2) for x in band)} "
-                f"exceeds human-prior '{ok.suggested_impedance}' band for "
-                f"'{ok.name}' — investigate; safety priors win for now"
-            )
+            conflicts.append(ok.name)
+            continue
         band = intersection
+
+    if conflicts:
+        cautious = _most_cautious_regime([ok.suggested_impedance for ok in object_knowledge])
+        return cautious, (
+            f"data-driven k_hat {tuple(round(x, 2) for x in data_band)} conflicts with "
+            f"priors on {conflicts} — defaulting to most cautious regime '{cautious}'"
+        )
     return _band_midpoint_to_regime(band), None
 
 
