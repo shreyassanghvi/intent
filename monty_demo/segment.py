@@ -17,6 +17,11 @@ from monty_demo.schemas import PhaseName, PhaseSegment
 _MIN_SEGMENT_FRAMES = 5
 _CONTACT_ERR_FRACTION = 0.4   # relative error threshold for "in contact zone"
 _LOW_VEL_FRACTION = 0.2       # relative velocity threshold for "near-stationary"
+# Absolute floor: if the *peak* tracking error never exceeds this in raw units
+# (joint-space, typically radians on ALOHA / Koch), there was no real contact —
+# normalization would otherwise inflate uniformly-low noise into a fake contact
+# zone.
+_NO_CONTACT_ERR_FLOOR = 0.05
 
 
 def _merge_tiny(segments: list[PhaseSegment], min_len: int) -> list[PhaseSegment]:
@@ -102,11 +107,17 @@ def segment_phases(
         return (PhaseSegment(name="manipulate", start_frame=0, end_frame=max(0, T - 1), confidence=0.4),)
 
     v_max = float(velocity_norm.max()) + 1e-6
-    e_max = float(tracking_error.max()) + 1e-6
+    e_max_raw = float(tracking_error.max())
+    e_max = e_max_raw + 1e-6
     v = velocity_norm / v_max
     e = tracking_error / e_max
 
-    contact_mask = e > _CONTACT_ERR_FRACTION
+    # Below the absolute floor, treat as pure free motion regardless of how
+    # "high" the relative error looks after normalization.
+    if e_max_raw < _NO_CONTACT_ERR_FLOOR:
+        contact_mask = np.zeros_like(e, dtype=bool)
+    else:
+        contact_mask = e > _CONTACT_ERR_FRACTION
     if not contact_mask.any():
         # Pure free motion — split the episode in half, approach then retract.
         mid = T // 2
