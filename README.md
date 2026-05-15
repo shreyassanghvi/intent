@@ -171,13 +171,13 @@ A few things this demo *does not* claim, and the README states them up front bec
 
 ## Performance budgets (visible in the notebook's timing cell)
 
-| Operation | Target | Typical |
+| Operation | Target | Notes |
 |---|---|---|
-| `Episode.from_lerobot` | < 200 ms | (after HF cache) |
-| `estimate_stiffness` | < 5 ms | 250 frames × 14 DOF |
-| `segment_phases` | < 2 ms | vectorized |
-| `kg.add(episode)` | < 1 ms | single-episode insert |
-| `reason(...)` | < 100 ms | over ~100 episodes |
+| `Episode.from_lerobot` | < 300 ms | After HF cache populated; dominated by parquet read + meta-shard walk |
+| `estimate_stiffness` | < 5 ms | 250 frames × 14 DOF; effort-fusion path adds a single percentile pass |
+| `segment_phases` | < 2 ms | Vectorized state machine over smoothed velocity / tracking-error |
+| `kg.add(episode)` | < 1 ms | Single-episode insert into the in-memory MultiDiGraph |
+| `reason(...)` | < 10 ms | Over the demo's ~5-episode KG; scales O(\|episodes\|) |
 
 Speed is a claim — the notebook prints actual ms per public op so you can verify.
 
