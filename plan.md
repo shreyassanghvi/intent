@@ -48,7 +48,7 @@ monty_demo/
   kg.py               # KnowledgeGraph (NetworkX-backed) + query() + to_cypher()
   reason.py           # reason() -> TaskBrief; ingest(); print_brief_diff()
   _io.py              # internal: HF-Hub parquet loading helpers
-  _timing.py          # internal: @timed decorator, timing accumulator
+  _timing.py          # @timed decorator + accumulator; format_timing_table / reset_timings are public
 notebooks/
   demo.ipynb          # the narrative — exercises the SDK on real episodes
 tests/
@@ -229,7 +229,7 @@ def estimate_stiffness(positions, actions, dt) -> np.ndarray:
     return _ema(raw, alpha=0.3).clip(0.0, 1.0).astype(np.float32)
 ```
 
-Vectorized; target < 5 ms for a 250-frame × 14-DOF episode.
+Vectorized; in practice < 1 ms for a 250-frame × 14-DOF episode.
 
 ### Phase segmenter (`segment.py`)
 
@@ -452,7 +452,7 @@ Single notebook, ~12 cells, runs end-to-end in < 90 s on a laptop after first ca
 3. **Ingest 3 brew-coffee episodes** — single `monty.ingest()` per loop iteration
 4. **Inspect KG state** — `kg.stats()` print + a small subgraph render via networkx
 5. **`brief_before = monty.reason(intent="brew-coffee", embodiment="aloha-bimanual")`** — print the TaskBrief
-6. **Attempt 1 (cross-skill):** ingest velcro episode, re-reason, show new `transferable_skills_observed` field
+6. **Attempt 1 (cross-skill):** ingest battery-insertion episode, re-reason, show new `transferable_skills_observed` field
 7. **Attempt 2 (cross-embodiment):** ingest Koch episode, re-reason, show confidence *drop* with explanation
 8. **Attempt 3 (outlier):** ingest weird-contact coffee episode, show `outlier_phases` warning
 9. **Cumulative diff** — `print_brief_diff(brief_before, brief_final)` — the money shot
